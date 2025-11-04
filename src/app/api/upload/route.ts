@@ -186,6 +186,9 @@ export async function POST(req: NextRequest) {
 
     let pageCount = 0
     try {
+      // Suppress PDF.js warnings temporarily
+      const originalWarn = console.warn
+      console.warn = () => {} // Suppress all warnings during PDF parsing
 
       const parsePdf = () => {
         return new Promise((resolve, reject) => {
@@ -206,6 +209,7 @@ export async function POST(req: NextRequest) {
       }
 
       pageCount = await parsePdf() as number
+      console.warn = originalWarn // Restore console.warn
       console.log('PDF parsed successfully, pages:', pageCount)
     } catch (parseError) {
       console.error('PDF parsing error:', parseError)
@@ -329,6 +333,9 @@ async function startBackgroundProcessing(documentId: string, buffer: Buffer) {
     // Extract text content from PDF using pdf2json
     let extractedText = ''
     try {
+      // Suppress PDF.js warnings temporarily
+      const originalWarn = console.warn
+      console.warn = () => {} // Suppress all warnings during PDF parsing
 
       const extractText = () => {
         return new Promise<string>((resolve, reject) => {
@@ -370,6 +377,7 @@ async function startBackgroundProcessing(documentId: string, buffer: Buffer) {
       }
 
       extractedText = await extractText()
+      console.warn = originalWarn // Restore console.warn
       console.log(`[Background] Extracted ${extractedText.length} characters from PDF`)
 
       // Count actual tokens using Gemini API

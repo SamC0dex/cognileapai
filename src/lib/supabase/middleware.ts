@@ -10,6 +10,9 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      auth: {
+        flowType: 'pkce',
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll()
@@ -37,15 +40,18 @@ export async function updateSession(request: NextRequest) {
 
   // Handle authentication errors gracefully
   if (error) {
-    console.error('Session validation error:', error.message)
-    
+    // Only log if it's a protected route - normal for public routes to have no session
+    if (request.nextUrl.pathname.startsWith('/dashboard')) {
+      console.error('Session validation error on protected route:', error.message)
+    }
+
     // Clear invalid session cookies
     const cookiesToClear = [
       'sb-access-token',
       'sb-refresh-token',
       `sb-${process.env.NEXT_PUBLIC_SUPABASE_URL?.split('//')[1]?.split('.')[0]}-auth-token`,
     ]
-    
+
     cookiesToClear.forEach(name => {
       supabaseResponse.cookies.delete(name)
     })
@@ -56,7 +62,7 @@ export async function updateSession(request: NextRequest) {
       url.pathname = '/auth/login'
       url.searchParams.set('redirect', request.nextUrl.pathname)
       url.searchParams.set('error', 'session_expired')
-      
+
       return NextResponse.redirect(url)
     }
   }

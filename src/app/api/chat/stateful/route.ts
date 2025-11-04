@@ -173,12 +173,12 @@ export async function POST(req: NextRequest) {
               if (processedDocs.length > 0) {
                 // Check if all documents have accurate token counts
                 const docsWithoutTokens = processedDocs.filter(doc => !doc.actualTokens || doc.tokenMethod !== 'api_count')
-                
+
                 if (docsWithoutTokens.length > 0) {
                   // Block chat if any document doesn't have accurate tokens
                   const missingDocs = docsWithoutTokens.map(d => d.title).join(', ')
                   return new Response(
-                    JSON.stringify({ 
+                    JSON.stringify({
                       error: 'Document processing incomplete',
                       message: `These documents need reprocessing: ${missingDocs}. Please re-upload them for accurate token counting.`,
                       details: 'Only documents with accurate token counts can be used for chat.'
@@ -186,9 +186,9 @@ export async function POST(req: NextRequest) {
                     { status: 400, headers: { 'Content-Type': 'application/json' } }
                   )
                 }
-                
+
                 // All documents have accurate tokens - use them
-                const totalActualTokens = processedDocs.reduce((sum, doc) => 
+                const totalActualTokens = processedDocs.reduce((sum, doc) =>
                   sum + (doc.actualTokens || 0), 0)
 
                 console.log(`[StatefulChat] Document tokens: ${totalActualTokens.toLocaleString()} (api_count)`)

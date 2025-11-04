@@ -492,7 +492,15 @@ export function useChatStore(): StoreShape {
         })
 
         if (!res.ok) {
-          throw new Error(`API error: ${res.status}`)
+          // Try to parse error response body for detailed error message
+          try {
+            const errorData = await res.json()
+            const errorMsg = errorData.message || errorData.error || errorData.details || `API error: ${res.status}`
+            throw new Error(errorMsg)
+          } catch {
+            // If JSON parsing fails, throw generic error
+            throw new Error(`API error: ${res.status}`)
+          }
         }
 
         if (!res.body) {

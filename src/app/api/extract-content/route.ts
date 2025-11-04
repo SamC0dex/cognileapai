@@ -63,6 +63,10 @@ export async function POST(req: NextRequest) {
     try {
       const PDFParser = (await import('pdf2json')).default
 
+      // Suppress PDF.js warnings temporarily
+      const originalWarn = console.warn
+      console.warn = () => {} // Suppress all warnings during PDF parsing
+
       const extractedText = await new Promise<string>((resolve, reject) => {
         const pdfParser = new PDFParser()
 
@@ -104,6 +108,7 @@ export async function POST(req: NextRequest) {
         pdfParser.parseBuffer(buffer)
       })
 
+      console.warn = originalWarn // Restore console.warn
       console.log(`Extracted ${extractedText.length} characters from PDF`)
 
       // Show first 500 characters as preview
