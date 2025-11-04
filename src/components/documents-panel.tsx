@@ -98,6 +98,7 @@ function DocumentsPanelContent({ isOpen, onClose, sidebarCollapsed = true }: Doc
   const [selectAll, setSelectAll] = useState(false)
   const [renameDialog, setRenameDialog] = useState<{open: boolean, document: DocumentItem | null}>({open: false, document: null})
   const [removeDialog, setRemoveDialog] = useState<{open: boolean, document: DocumentItem | null}>({open: false, document: null})
+  const [massRemoveDialog, setMassRemoveDialog] = useState<{open: boolean, count: number}>({open: false, count: 0})
   const [newDocumentName, setNewDocumentName] = useState('')
   const [uploadError, setUploadError] = useState<UserFacingError | null>(null)
 
@@ -415,6 +416,60 @@ function DocumentsPanelContent({ isOpen, onClose, sidebarCollapsed = true }: Doc
     setRemoveDialog({open: false, document: null})
   }
 
+  const handleMassRemove = () => {
+    const count = contextSelectedDocs.length
+    if (count === 0) return
+    setMassRemoveDialog({open: true, count})
+  }
+
+  const handleMassRemoveConfirm = async () => {
+    const docsToRemove = [...contextSelectedDocs]
+    const totalCount = docsToRemove.length
+
+    if (totalCount === 0) {
+      setMassRemoveDialog({open: false, count: 0})
+      return
+    }
+
+    setMassRemoveDialog({open: false, count: 0})
+
+    let successCount = 0
+    let failCount = 0
+
+    // Delete all selected documents
+    for (const doc of docsToRemove) {
+      try {
+        const { error } = await supabase
+          .from('documents')
+          .delete()
+          .eq('id', doc.id)
+
+        if (error) {
+          console.error(`Failed to remove document ${doc.id}:`, error)
+          failCount++
+        } else {
+          removeDocumentFromContext(doc.id)
+          successCount++
+        }
+      } catch (error) {
+        console.error(`Failed to remove document ${doc.id}:`, error)
+        failCount++
+      }
+    }
+
+    // Show appropriate toast messages
+    if (successCount > 0 && failCount === 0) {
+      toast.success(`Successfully removed ${successCount} ${successCount === 1 ? 'document' : 'documents'}`)
+    } else if (successCount > 0 && failCount > 0) {
+      toast.warning(`Removed ${successCount} ${successCount === 1 ? 'document' : 'documents'}, but ${failCount} failed`)
+    } else if (failCount > 0) {
+      toast.error(`Failed to remove ${failCount} ${failCount === 1 ? 'document' : 'documents'}`)
+    }
+
+    // Clear select all state if it was enabled
+    setSelectAll(false)
+  }
+
   // Update selectAll state when documents change
   React.useEffect(() => {
     if (documents.length > 0) {
@@ -528,32 +583,41 @@ function DocumentsPanelContent({ isOpen, onClose, sidebarCollapsed = true }: Doc
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {documents.length > 0 && (
+                  {documents.length > 0 && contextSelectedDocs.length > 0 && (
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Select all sources</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleSelectAll}
+                          className={`w-4 h-4 border rounded flex items-center justify-center shrink-0 transition-colors ${
+                            selectAll
+                              ? 'border-primary bg-primary'
+                              : 'border-muted-foreground/30 bg-transparent hover:border-primary/50'
+                          }`}
+                        >
+                          {selectAll && (
+                            <svg
+                              className="w-2.5 h-2.5 text-primary-foreground"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={3}
+                                d="M5 13l4 4L19 7"
+                              />
+                            </svg>
+                          )}
+                        </button>
+                        <span>Select all sources</span>
+                      </div>
                       <button
-                        onClick={handleSelectAll}
-                        className={`w-4 h-4 border rounded flex items-center justify-center transition-colors ${
-                          selectAll
-                            ? 'border-primary bg-primary'
-                            : 'border-muted-foreground/30 bg-transparent hover:border-primary/50'
-                        }`}
+                        onClick={handleMassRemove}
+                        className="text-destructive hover:text-destructive/80 transition-colors p-1 hover:bg-destructive/10 rounded"
+                        title={`Delete ${contextSelectedDocs.length} selected ${contextSelectedDocs.length === 1 ? 'document' : 'documents'}`}
                       >
-                        {selectAll && (
-                          <svg
-                            className="w-2.5 h-2.5 text-primary-foreground"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={3}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        )}
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   )}
@@ -729,6 +793,26 @@ function DocumentsPanelContent({ isOpen, onClose, sidebarCollapsed = true }: Doc
                 </AlertDialogCancel>
                 <AlertDialogAction onClick={handleRemoveConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                   Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          {/* Mass Remove Dialog */}
+          <AlertDialog open={massRemoveDialog.open} onOpenChange={(open) => !open && setMassRemoveDialog({open: false, count: 0})}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove Multiple Documents</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to remove {massRemoveDialog.count} {massRemoveDialog.count === 1 ? 'document' : 'documents'}? This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setMassRemoveDialog({open: false, count: 0})}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction onClick={handleMassRemoveConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Remove All
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
