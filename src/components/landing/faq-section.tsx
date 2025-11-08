@@ -3,9 +3,8 @@
 import { motion, AnimatePresence } from "framer-motion"
 import { Plus, Minus, HelpCircle } from "lucide-react"
 import { useState } from "react"
-import { SectionBackground } from "./animated-background"
+import { SectionBackground } from "./backgrounds"
 import { cn } from "@/lib/utils"
-import { useLandingAnimation } from "@/lib/landing/landing-animation-context"
 
 /**
  * FAQ Section - Modern Accordion with Smooth Animations
@@ -21,7 +20,7 @@ const FAQ_ITEMS = [
   {
     question: "What makes this different from other study tools?",
     answer:
-      "CogniLeap uses production-grade AI with Google Gemini 2.5 Pro's massive 1M token context window. Unlike basic note-taking apps, we build complete knowledge structures from your documents, enabling deep understanding rather than surface-level summaries. The system understands context, relationships, and can answer complex questions about your materials.",
+      "CogniLeap uses production-grade AI with Google Gemini models' 250K token context window. Unlike basic note-taking apps, we build complete knowledge structures from your documents, enabling deep understanding rather than surface-level summaries. The system understands context, relationships, and can answer complex questions about your materials.",
   },
   {
     question: "How does the AI processing work?",
@@ -61,13 +60,11 @@ function FAQAccordionItem({
   isOpen: boolean
   onToggle: () => void
 }) {
-  const { shouldAnimate } = useLandingAnimation()
-
   return (
     <motion.div
-      initial={shouldAnimate ? { opacity: 0, y: 20 } : false}
+      initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-50px" }}
+      viewport={{ once: true }}
       transition={{ delay: index * 0.08 }}
       className={cn(
         "group relative overflow-hidden rounded-xl border transition-all duration-300",
@@ -84,18 +81,21 @@ function FAQAccordionItem({
       {/* Question button */}
       <button
         onClick={onToggle}
-        className="flex w-full items-start gap-4 p-6 text-left transition-colors"
+        className={cn(
+          "flex w-full items-center gap-3 text-left transition-colors",
+          isOpen ? "px-4 pt-4 pb-0" : "p-4"
+        )}
       >
         {/* Icon */}
         <motion.div
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-teal-400 text-white shadow-lg"
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-teal-400 text-white shadow-lg"
           animate={{
             rotate: isOpen ? 180 : 0,
             scale: isOpen ? 1.05 : 1,
           }}
           transition={{ duration: 0.3, type: "spring", stiffness: 200 }}
         >
-          {isOpen ? <Minus className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+          {isOpen ? <Minus className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
         </motion.div>
 
         {/* Question text */}
@@ -114,7 +114,7 @@ function FAQAccordionItem({
       <AnimatePresence initial={false}>
         {isOpen && (
           <motion.div
-            initial={shouldAnimate ? { height: 0, opacity: 0 } : false}
+            initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{
@@ -124,11 +124,11 @@ function FAQAccordionItem({
             className="overflow-hidden"
           >
             <motion.div
-              initial={shouldAnimate ? { y: -10 } : false}
+              initial={{ y: -10 }}
               animate={{ y: 0 }}
               exit={{ y: -10 }}
               transition={{ duration: 0.2 }}
-              className="px-6 pb-6 pl-[4.5rem]"
+              className="px-4 pt-2 pb-4 pl-[3.75rem]"
             >
               <p className="text-sm leading-relaxed text-muted-foreground">{item.answer}</p>
             </motion.div>
@@ -158,7 +158,6 @@ function FAQAccordionItem({
 
 export default function FaqSection() {
   const [openIndex, setOpenIndex] = useState<number | null>(null)
-  const { shouldAnimate } = useLandingAnimation()
 
   const handleToggle = (index: number) => {
     setOpenIndex(openIndex === index ? null : index)
@@ -171,21 +170,17 @@ export default function FaqSection() {
       <div className="relative mx-auto max-w-7xl px-6">
         {/* Section header */}
         <motion.div
-          initial={shouldAnimate ? { opacity: 0, y: 20 } : false}
+          initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: 0.5 }}
           className="mx-auto max-w-4xl text-center"
         >
-          <motion.div
-            initial={shouldAnimate ? { opacity: 0, scale: 0.9 } : false}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm backdrop-blur-sm"
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm backdrop-blur-sm shadow-sm dark:shadow-none"
           >
             <HelpCircle className="h-3.5 w-3.5 text-primary" />
             <span className="font-medium">Common Questions</span>
-          </motion.div>
+          </div>
 
           <h2 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
             Everything You{" "}
@@ -201,13 +196,7 @@ export default function FaqSection() {
         </motion.div>
 
         {/* FAQ Accordion */}
-        <motion.div
-          initial={shouldAnimate ? { opacity: 0, y: 30 } : false}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8, delay: 0.2 }}
-          className="mx-auto mt-16 max-w-4xl"
-        >
+        <div className="mx-auto mt-16 max-w-4xl">
           <div className="space-y-4">
             {FAQ_ITEMS.map((item, index) => (
               <FAQAccordionItem
@@ -219,31 +208,7 @@ export default function FaqSection() {
               />
             ))}
           </div>
-        </motion.div>
-
-        {/* Contact CTA */}
-        <motion.div
-          initial={shouldAnimate ? { opacity: 0, y: 20 } : false}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6, delay: 0.6 }}
-          className="mt-16 text-center"
-        >
-          <div className="relative inline-flex flex-col items-center gap-3 overflow-hidden rounded-2xl border border-white/70 px-8 py-6 backdrop-blur-sm dark:border-white/10">
-            <div className="pointer-events-none absolute inset-0 rounded-2xl bg-white/95 shadow-[0_24px_48px_rgba(15,23,42,0.08)] dark:bg-[rgba(15,23,42,0.82)] dark:shadow-[0_22px_48px_rgba(2,6,23,0.55)]" />
-            <div className="relative z-10 flex flex-col items-center gap-3">
-              <p className="text-sm text-muted-foreground">Still have questions?</p>
-              <p className="text-sm">
-                This is a college project showcase built to demonstrate advanced AI integration and modern web
-                development.
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                <span className="inline-flex h-2 w-2 rounded-full bg-teal-500" />
-                <span>Built with Next.js 15 • Google Gemini 2.5 Pro</span>
-              </div>
-            </div>
-          </div>
-        </motion.div>
+        </div>
       </div>
     </section>
   )

@@ -2,26 +2,21 @@ import HeroSection from "@/components/landing/hero-section"
 import FeaturesSection from "@/components/landing/features-section"
 import HowItWorksSection from "@/components/landing/how-it-works-section"
 import BenefitsSection from "@/components/landing/benefits-section"
-import DemoShowcaseSection from "@/components/landing/demo-showcase-section"
 import FaqSection from "@/components/landing/faq-section"
 import FinalCtaSection from "@/components/landing/final-cta-section"
 import LandingFooter from "@/components/landing/footer"
 import { Header } from "@/components/header"
-import { LandingAnimationProvider } from "@/lib/landing/landing-animation-context"
 
 export default function HomePage() {
   return (
     <main className="min-h-screen overflow-x-hidden w-full">
       <Header />
-      <LandingAnimationProvider>
-        <HeroSection />
-        <FeaturesSection />
-        <HowItWorksSection />
-        <BenefitsSection />
-        <DemoShowcaseSection />
-        <FaqSection />
-        <FinalCtaSection />
-      </LandingAnimationProvider>
+      <HeroSection />
+      <FeaturesSection />
+      <HowItWorksSection />
+      <BenefitsSection />
+      <FaqSection />
+      <FinalCtaSection />
       <LandingFooter />
     </main>
   )

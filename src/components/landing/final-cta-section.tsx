@@ -3,40 +3,43 @@
 import Link from "next/link"
 import { motion } from "framer-motion"
 import { buttonVariants } from "@/components/ui"
-import { animationVariants as A, getReducedMotionVariants } from "@/lib/landing/animation-variants"
-import { useLandingAnimation } from "@/lib/landing/landing-animation-context"
-import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion"
+import { ArrowRight } from "lucide-react"
 
 export default function FinalCtaSection() {
-  const prefersReducedMotion = usePrefersReducedMotion()
-  const { shouldAnimate } = useLandingAnimation()
   return (
-    <section className="relative py-8 sm:py-12" suppressHydrationWarning>
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
-        <div className="absolute -top-24 left-1/2 h-72 w-[36rem] -translate-x-1/2 rounded-full blur-3xl opacity-25 bg-[radial-gradient(ellipse_at_center,theme(colors.brand.purple.500),transparent_60%)] dark:opacity-30" />
-      </div>
-      <div className="mx-auto max-w-7xl px-6">
+    <section className="relative py-8 sm:py-12">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6">
         <motion.div
-          initial={shouldAnimate ? "hidden" : false}
-          whileInView="visible"
-          viewport={{ once: true, amount: 0.4 }}
-          variants={prefersReducedMotion ? getReducedMotionVariants(A.scroll.reveal) : A.scroll.reveal}
-          className="mx-auto max-w-3xl rounded-3xl border bg-card/70 p-8 text-center shadow-glow backdrop-blur"
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5 }}
+          className="mx-auto max-w-3xl rounded-3xl border border-border/50 bg-white/95 dark:bg-card/80 p-8 sm:p-12 text-center backdrop-blur-sm shadow-xl"
         >
-          <h2 className="text-balance text-3xl font-semibold sm:text-4xl">Study faster. Understand deeper.</h2>
-          <p className="mt-3 text-muted-foreground">CogniLeap turns dense PDFs into knowledge you can act on.</p>
-          <div className="mt-6 flex items-center justify-center gap-3">
+          <h2 className="text-balance text-3xl font-bold sm:text-4xl md:text-5xl">
+            Ready to{" "}
+            <span className="bg-gradient-to-r from-primary via-amber-500 to-primary bg-clip-text text-transparent">
+              Transform Your Learning?
+            </span>
+          </h2>
+          <p className="mt-4 text-lg text-muted-foreground">
+            Join students and professionals who are mastering knowledge faster with AI-powered study tools.
+          </p>
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
-              href="/auth/login"
-              className={buttonVariants({ size: "lg", variant: "default" }) + " shadow-glow"}
+              href="/auth/sign-up"
+              className={buttonVariants({ size: "lg", variant: "default" }) + " text-base px-8 py-6 shadow-lg group"}
             >
-              Start now
+              <span className="flex items-center gap-2 font-semibold">
+                Start Learning Free
+                <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
+              </span>
             </Link>
             <Link
-              href="/dashboard"
-              className={buttonVariants({ size: "lg", variant: "outline" })}
+              href="/auth/login"
+              className={buttonVariants({ size: "lg", variant: "outline" }) + " text-base px-8 py-6 shadow-md dark:shadow-none"}
             >
-              Try the demo
+              Sign In
             </Link>
           </div>
         </motion.div>

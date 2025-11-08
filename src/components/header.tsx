@@ -1,16 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Sun, Moon, Menu } from 'lucide-react'
+import { Sun, Moon } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import Link from 'next/link'
 import { Logo } from './logo'
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui'
+import { buttonVariants } from '@/components/ui'
 import { useRouter } from 'next/navigation'
 
 export function Header() {
@@ -95,14 +90,14 @@ export function Header() {
 
   return (
     <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2">
-        <div className="flex h-10 items-center justify-between">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-3">
+        <div className="flex h-12 items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
-            <Logo width={24} height={24} />
-            <span className="text-lg font-semibold">CogniLeap</span>
+            <Logo width={28} height={28} />
+            <span className="text-xl font-semibold">CogniLeap</span>
           </Link>
-          
-          <div className="flex items-center gap-1">
+
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={toggleTheme}
               className="p-2 rounded-md hover:bg-muted transition-colors"
@@ -118,21 +113,20 @@ export function Header() {
                 <Sun className="h-4 w-4" />
               )}
             </button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="p-2 rounded-md hover:bg-muted transition-colors" aria-label="Menu">
-                  <Menu className="h-4 w-4" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link href="/auth/login">Log in</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/auth/sign-up">Sign up</Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+
+            <Link
+              href="/auth/login"
+              className={buttonVariants({ variant: "ghost", size: "sm" }) + " text-sm"}
+            >
+              Log in
+            </Link>
+
+            <Link
+              href="/auth/sign-up"
+              className={buttonVariants({ variant: "default", size: "sm" }) + " text-sm"}
+            >
+              Sign up
+            </Link>
           </div>
         </div>
       </div>

@@ -21,7 +21,9 @@ prompts/
 docs/EXECUTION_PLAYBOOK.md
 docs/COORDINATOR_GUIDE.md
 docs/TESTING_GUIDE.md
-docs/
+
+# AI agent configuration (now organized in docs/ai-config/)
+docs/ai-config/
 
 # Project-specific configuration (contains project references)
 opencode.json
@@ -32,14 +34,10 @@ PHASE_1_COMPLETE.md
 PHASE_2_COMPLETE.md
 OAUTH_CALLBACK_IMPLEMENTATION.md
 CONVERSATION_STUDY_TOOLS_FIX.md
-
-# AI agent reference files (not needed for public/project)
-CLAUDE.md
-AGENTS.md
 GITHUB_DEPLOYMENT_READY.md
 PRE_PUSH_SECURITY_CHECKLIST.md
-Landing page tips/
-.claude/
+
+# Development utilities
 .playwright-mcp/
 clear-storage.html
 
