@@ -131,6 +131,8 @@ const config: Config = {
         'scale-out': 'scaleOut 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         'bounce-in': 'bounceIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
         'check-pop': 'checkPop 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        'accordion-down': 'accordionDown 0.2s ease-out',
+        'accordion-up': 'accordionUp 0.2s ease-out',
         pulse: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         spin: 'spin 1s linear infinite',
         ping: 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite',
@@ -179,6 +181,14 @@ const config: Config = {
           '0%': { transform: 'scale(0.96)' },
           '50%': { transform: 'scale(1.04)' },
           '100%': { transform: 'scale(1)' },
+        },
+        accordionDown: {
+          from: { height: '0' },
+          to: { height: 'var(--radix-accordion-content-height)' },
+        },
+        accordionUp: {
+          from: { height: 'var(--radix-accordion-content-height)' },
+          to: { height: '0' },
         },
         progress: {
           '0%': { transform: 'translateX(-100%)' },

@@ -1,8 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import { BookOpen, PenTool, Zap } from 'lucide-react'
-import { ActionCard } from '@/components/ui'
+import { BookOpen, PenTool, Zap, GraduationCap } from 'lucide-react'
+import { ActionCard, Badge } from '@/components/ui'
 import { FlashcardsStackIcon } from '@/components/icons/flashcards-stack-icon'
 import { useStudyToolsStore, type StudyToolType } from '@/lib/study-tools-store'
 import { useRouter } from 'next/navigation'
@@ -19,6 +19,7 @@ type CardItem = {
   variant: 'default' | 'purple' | 'teal'
   onClick?: () => void
   href?: string
+  badge?: React.ReactNode
 }
 
 export function DashboardActionCards({}: DashboardActionCardsProps) {
@@ -36,6 +37,14 @@ export function DashboardActionCards({}: DashboardActionCardsProps) {
   }
 
   const actionCards: CardItem[] = [
+    {
+      title: "Generate Course",
+      description: "5-min lessons with quizzes",
+      icon: <GraduationCap className="h-6 w-6" />,
+      variant: "teal" as const,
+      href: '/courses/create',
+      badge: <Badge variant="new" className="absolute top-2 right-2 text-xs px-2 py-0.5">NEW</Badge>
+    },
     {
       title: "Generate Study Guide",
       description: "Structured learning materials",
@@ -70,18 +79,20 @@ export function DashboardActionCards({}: DashboardActionCardsProps) {
     <div className="px-8 py-4">
       <div className="space-y-6">
         {/* Action Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 max-w-6xl">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 max-w-7xl">
           {actionCards.map((card) => {
             const content = (
-              <ActionCard
-                key={card.title}
-                title={card.title}
-                description={card.description}
-                icon={card.icon}
-                variant={card.variant}
-                onClick={card.href ? undefined : card.onClick}
-                className="h-24 hover:shadow-glow"
-              />
+              <div key={card.title} className="relative">
+                <ActionCard
+                  title={card.title}
+                  description={card.description}
+                  icon={card.icon}
+                  variant={card.variant}
+                  onClick={card.href ? undefined : card.onClick}
+                  className="h-24 hover:shadow-glow"
+                />
+                {card.badge}
+              </div>
             )
             return card.href ? (
               <Link key={card.title} href={card.href} prefetch>
@@ -92,7 +103,20 @@ export function DashboardActionCards({}: DashboardActionCardsProps) {
         </div>
 
         {/* Feature Highlights */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl pt-4 mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 max-w-6xl pt-4 mx-auto">
+          {/* Courses */}
+          <div className="text-center space-y-2">
+            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-teal-500/20 to-teal-500/10 flex items-center justify-center mx-auto border border-teal-500/20">
+              <GraduationCap className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-base mb-1">Courses</h3>
+              <p className="text-sm text-muted-foreground">
+                AI-generated micro-courses with lessons, quizzes, and progress tracking
+              </p>
+            </div>
+          </div>
+
           {/* Study Guides */}
           <div className="text-center space-y-2">
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-500/10 flex items-center justify-center mx-auto border border-blue-500/20">

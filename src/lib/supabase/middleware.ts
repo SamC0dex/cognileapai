@@ -70,7 +70,9 @@ export async function updateSession(request: NextRequest) {
   // Protect routes that require authentication
   if (
     !user &&
-    request.nextUrl.pathname.startsWith('/dashboard')
+    (request.nextUrl.pathname.startsWith('/dashboard') ||
+     request.nextUrl.pathname.startsWith('/courses') ||
+     request.nextUrl.pathname.startsWith('/chat'))
   ) {
     // No user, redirect to login
     const url = request.nextUrl.clone()
