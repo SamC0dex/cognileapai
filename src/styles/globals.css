@@ -639,3 +639,116 @@ html.theme-instant, html.theme-instant *, html.theme-instant *::before, html.the
     transform: none !important;
   }
 }
+
+/* ==========================================
+   MERMAID DIAGRAM STYLES
+   ========================================== */
+
+/* Container styling */
+.mermaid-container {
+  animation: diagramFadeIn 0.4s ease-out;
+}
+
+@keyframes diagramFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Interactive node hover effects */
+.mermaid svg .node rect,
+.mermaid svg .node circle,
+.mermaid svg .node ellipse,
+.mermaid svg .node polygon {
+  cursor: pointer;
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.mermaid svg .node:hover rect,
+.mermaid svg .node:hover circle,
+.mermaid svg .node:hover ellipse,
+.mermaid svg .node:hover polygon {
+  filter: brightness(1.08) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.15));
+}
+
+/* Edge/link animations */
+.mermaid svg .flowchart-link {
+  stroke-dasharray: 0;
+  transition: stroke-width 0.2s ease;
+}
+
+.mermaid svg .node:hover ~ .flowchart-link {
+  stroke-width: 2.5px;
+}
+
+/* Animated flowing edges (optional - subtle) */
+.mermaid svg .edge-pattern-dotted {
+  stroke-dasharray: 5;
+  animation: flowDash 15s linear infinite;
+}
+
+@keyframes flowDash {
+  to {
+    stroke-dashoffset: -50;
+  }
+}
+
+/* Node label styling */
+.mermaid svg .nodeLabel {
+  font-family: ui-sans-serif, system-ui, sans-serif !important;
+  font-weight: 500;
+}
+
+/* Tooltip-like effect for clicked nodes */
+.mermaid svg .node.clicked rect,
+.mermaid svg .node.clicked circle {
+  stroke-width: 3px;
+  animation: nodePulse 1.5s ease-in-out infinite;
+}
+
+@keyframes nodePulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.4));
+  }
+}
+
+/* Dark mode adjustments for Mermaid */
+.dark .mermaid svg {
+  filter: brightness(0.95);
+}
+
+.dark .mermaid svg .nodeLabel {
+  fill: hsl(var(--foreground)) !important;
+}
+
+/* Sequence diagram participant styling */
+.mermaid svg .actor {
+  transition: filter 0.2s ease;
+}
+
+.mermaid svg .actor:hover {
+  filter: brightness(1.1);
+}
+
+/* Mind map specific styling */
+.mermaid svg .mindmap-node rect {
+  rx: 8px;
+  ry: 8px;
+}
+
+/* Timeline specific styling */
+.mermaid svg .timeline-section rect {
+  transition: opacity 0.2s ease;
+}
+
+.mermaid svg .timeline-section:hover rect {
+  opacity: 0.9;
+}

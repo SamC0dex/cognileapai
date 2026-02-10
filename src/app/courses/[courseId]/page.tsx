@@ -58,28 +58,16 @@ export default function CourseOverviewPage() {
       return
     }
 
-    console.log('[CoursePage] Course is generating, starting polling...')
-
     const pollInterval = setInterval(async () => {
       try {
         await fetchCourseDetails(courseId)
-        console.log('[CoursePage] Polled course status:', activeCourse?.status, activeCourse?.generationProgress)
-
-        // If generation complete, reload the page to show full course
-        if (activeCourse?.status === 'ready') {
-          console.log('[CoursePage] Generation complete! Reloading...')
-          window.location.reload()
-        }
       } catch (error) {
         console.error('[CoursePage] Failed to poll course status:', error)
       }
-    }, 2000) // Poll every 2 seconds
+    }, 2000)
 
-    return () => {
-      console.log('[CoursePage] Stopping polling')
-      clearInterval(pollInterval)
-    }
-  }, [activeCourse?.status, courseId, fetchCourseDetails, activeCourse])
+    return () => clearInterval(pollInterval)
+  }, [activeCourse?.status, courseId, fetchCourseDetails])
 
   const handleRename = () => {
     setNewTitle(activeCourse?.title || '')
@@ -165,7 +153,7 @@ export default function CourseOverviewPage() {
 
   return (
     <DashboardLayout>
-      <div className="min-h-screen bg-gray-50/50 dark:bg-gray-950">
+      <div className="min-h-screen bg-background">
         {/* Header */}
         <CourseHeader
           title={activeCourse.title}
@@ -190,7 +178,7 @@ export default function CourseOverviewPage() {
               courseName={activeCourse.title}
             />
           ) : (
-            <div className="max-w-md mx-auto text-center p-12 rounded-2xl bg-white dark:bg-gray-900 shadow-lg">
+            <div className="max-w-md mx-auto text-center p-12 rounded-2xl bg-card border shadow-lg">
               <BookOpen className="h-12 w-12 mx-auto mb-4 text-violet-500" />
               <h3 className="text-lg font-semibold mb-2">No Content Yet</h3>
               <p className="text-muted-foreground">

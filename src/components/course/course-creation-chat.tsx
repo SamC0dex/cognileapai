@@ -2,12 +2,13 @@
 
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sparkles, FileText, Upload, Camera, HelpCircle, X } from 'lucide-react'
+import { Sparkles, FileText, Upload, HelpCircle, X, Zap, Brain, Eye } from 'lucide-react'
 import { useDocuments } from '@/contexts/documents-context'
-import { useCourseStore } from '@/lib/course-store'
+import { useCourseStore, type ExistingCourseInfo } from '@/lib/course-store'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui'
+import { ExistingCourseDialog } from './existing-course-dialog'
 
 const MIN_HEIGHT = 120
 const MAX_HEIGHT = 200
@@ -15,11 +16,14 @@ const MAX_HEIGHT = 200
 export function CourseCreationChat() {
   const router = useRouter()
   const { selectedDocuments, removeSelectedDocument, addUploadingDocument, updateUploadingDocument, removeUploadingDocument, addSelectedDocument } = useDocuments()
-  const { startGeneration, isGenerating } = useCourseStore()
+  const { startGeneration, isGenerating, checkExistingCourse } = useCourseStore()
   const [customInstructions, setCustomInstructions] = React.useState('')
   const [textareaHeight, setTextareaHeight] = React.useState(MIN_HEIGHT)
   const [isUploading, setIsUploading] = React.useState(false)
   const [isStartingGeneration, setIsStartingGeneration] = React.useState(false)
+  const [isCheckingExisting, setIsCheckingExisting] = React.useState(false)
+  const [existingCourseDialogOpen, setExistingCourseDialogOpen] = React.useState(false)
+  const [existingCourseInfo, setExistingCourseInfo] = React.useState<ExistingCourseInfo | null>(null)
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
   // Calculate textarea height based on content
@@ -119,28 +123,47 @@ export function CourseCreationChat() {
     input.click()
   }, [isUploading, addUploadingDocument, updateUploadingDocument, removeUploadingDocument, addSelectedDocument])
 
-  const handleGenerateCourse = async () => {
+  const handleGenerateCourse = async (forceNew = false) => {
     if (selectedDocuments.length === 0) {
       toast.error('Please select at least one document from the Sources panel')
       return
     }
 
-    if (isStartingGeneration || isGenerating) {
+    if (isStartingGeneration || isGenerating || isCheckingExisting) {
       return
     }
 
     const selectedDoc = selectedDocuments[0]
 
+    // If not forcing new, check for existing course first
+    if (!forceNew) {
+      setIsCheckingExisting(true)
+      try {
+        const existing = await checkExistingCourse(selectedDoc.id)
+        if (existing) {
+          setExistingCourseInfo(existing)
+          setExistingCourseDialogOpen(true)
+          setIsCheckingExisting(false)
+          return
+        }
+      } catch (error) {
+        console.error('Error checking existing course:', error)
+      } finally {
+        setIsCheckingExisting(false)
+      }
+    }
+
+    // Proceed with generation
     setIsStartingGeneration(true)
     try {
       const courseId = await startGeneration(
         selectedDoc.id,
         selectedDoc.title,
-        customInstructions || undefined
+        customInstructions || undefined,
+        forceNew
       )
 
       if (courseId) {
-        // Redirect to course detail page where generation will show in real-time
         toast.success('Course generation started!')
         router.push(`/courses/${courseId}`)
       }
@@ -152,7 +175,35 @@ export function CourseCreationChat() {
     }
   }
 
-  const canGenerate = selectedDocuments.length > 0 && !isStartingGeneration && !isGenerating
+  const handleGoToExistingCourse = (courseId: string) => {
+    setExistingCourseDialogOpen(false)
+    router.push(`/courses/${courseId}`)
+  }
+
+  const handleCreateNewCourse = () => {
+    setExistingCourseDialogOpen(false)
+    handleGenerateCourse(true)
+  }
+
+  const handleViewAllCourses = () => {
+    setExistingCourseDialogOpen(false)
+    router.push('/courses')
+  }
+
+  const canGenerate = selectedDocuments.length > 0 && !isStartingGeneration && !isGenerating && !isCheckingExisting
+
+  const suggestionChips = [
+    { label: 'Focus on key concepts', icon: Brain },
+    { label: 'Include practice problems', icon: Zap },
+    { label: 'Make it visual', icon: Eye },
+  ]
+
+  const handleChipClick = (label: string) => {
+    setCustomInstructions(prev => {
+      if (prev.includes(label)) return prev
+      return prev ? `${prev}\n${label}` : label
+    })
+  }
 
   return (
     <div className="h-full flex items-center justify-center p-6 bg-gradient-to-br from-background via-background to-muted/10">
@@ -168,17 +219,17 @@ export function CourseCreationChat() {
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-            className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-teal-500 to-teal-600"
+            className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600"
           >
             <Sparkles className="h-8 w-8 text-white" />
           </motion.div>
 
           <div>
             <h2 className="text-3xl font-bold text-foreground mb-2">
-              Your gentle learning companion
+              Turn any document into a course
             </h2>
             <p className="text-base text-muted-foreground">
-              Start with anything - notes, questions, or just a topic
+              Upload your notes, PDFs, or slides — your personalized course is seconds away
             </p>
           </div>
         </div>
@@ -230,9 +281,9 @@ export function CourseCreationChat() {
               ref={textareaRef}
               value={customInstructions}
               onChange={handleInputChange}
-              placeholder="What would you like to learn about today? Ask a question, share notes, or just type a topic..."
+              placeholder="Add specific instructions — e.g. &quot;focus on chapter 3&quot; or &quot;explain like I'm a beginner&quot;..."
               className="w-full resize-none bg-transparent text-base placeholder:text-muted-foreground focus:outline-none p-4 rounded-2xl"
-              style={{ 
+              style={{
                 height: textareaHeight,
                 minHeight: MIN_HEIGHT,
                 maxHeight: MAX_HEIGHT
@@ -240,14 +291,36 @@ export function CourseCreationChat() {
             />
           </div>
 
+          {/* Suggestion Chips */}
+          <div className="flex flex-wrap gap-2 justify-center">
+            {suggestionChips.map((chip) => {
+              const Icon = chip.icon
+              return (
+                <button
+                  key={chip.label}
+                  onClick={() => handleChipClick(chip.label)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-full border border-border bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-all"
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  {chip.label}
+                </button>
+              )
+            })}
+          </div>
+
           {/* Create Button */}
           <Button
-            onClick={handleGenerateCourse}
+            onClick={() => handleGenerateCourse()}
             disabled={!canGenerate}
             size="lg"
-            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium text-base py-6 rounded-xl shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-semibold text-base py-6 rounded-xl shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isStartingGeneration || isGenerating ? (
+            {isCheckingExisting ? (
+              <>
+                <div className="mr-2 h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Checking...
+              </>
+            ) : isStartingGeneration || isGenerating ? (
               <>
                 <div className="mr-2 h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 Starting generation...
@@ -255,7 +328,7 @@ export function CourseCreationChat() {
             ) : (
               <>
                 <Sparkles className="mr-2 h-5 w-5" />
-                Create my gentle lesson
+                Generate Course
               </>
             )}
           </Button>
@@ -274,7 +347,7 @@ export function CourseCreationChat() {
                   <Upload className="h-5 w-5 text-teal-600" />
                 )}
               </div>
-              <span className="text-sm font-medium text-foreground">Upload notes</span>
+              <span className="text-sm font-medium text-foreground">Upload PDF</span>
             </button>
 
             <button
@@ -289,7 +362,7 @@ export function CourseCreationChat() {
               <div className="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center">
                 <FileText className="h-5 w-5 text-purple-600" />
               </div>
-              <span className="text-sm font-medium text-foreground">Select docs</span>
+              <span className="text-sm font-medium text-foreground">My documents</span>
             </button>
 
             <button
@@ -299,16 +372,28 @@ export function CourseCreationChat() {
               <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center">
                 <HelpCircle className="h-5 w-5 text-blue-600" />
               </div>
-              <span className="text-sm font-medium text-foreground">Get help</span>
+              <span className="text-sm font-medium text-foreground">Ask AI</span>
             </button>
           </div>
 
           {/* Footer */}
           <p className="text-sm text-center text-muted-foreground pt-2">
-            Just 5 minutes • Zero pressure • You&apos;ve got this
+            AI-powered • ADHD-friendly • Built for focus
           </p>
         </motion.div>
       </motion.div>
+
+      {/* Existing Course Dialog */}
+      <ExistingCourseDialog
+        isOpen={existingCourseDialogOpen}
+        onClose={() => setExistingCourseDialogOpen(false)}
+        onGoToExisting={handleGoToExistingCourse}
+        onCreateNew={handleCreateNewCourse}
+        onViewAllCourses={handleViewAllCourses}
+        existingCourse={existingCourseInfo}
+        totalExisting={existingCourseInfo?.totalExisting || 1}
+        documentTitle={selectedDocuments[0]?.title || 'your document'}
+      />
     </div>
   )
 }

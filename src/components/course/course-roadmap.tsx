@@ -72,12 +72,12 @@ export function CourseRoadmap({
               <div className={cn(
                 "w-10 h-10 rounded-full flex items-center justify-center transition-all",
                 isCompleted 
-                  ? "bg-gradient-to-br from-amber-400 to-yellow-500 shadow-md" 
-                  : "bg-gray-200 dark:bg-gray-700"
+                  ? "bg-gradient-to-br from-amber-400 to-yellow-500 shadow-md"
+                  : "bg-muted"
               )}>
                 <Star className={cn(
                   "w-5 h-5",
-                  isCompleted ? "text-white fill-white" : "text-gray-400 dark:text-gray-500"
+                  isCompleted ? "text-white fill-white" : "text-muted-foreground"
                 )} />
               </div>
 
@@ -147,7 +147,7 @@ export function CourseRoadmap({
                         
                         <button
                           onClick={() => firstLesson && onLessonClick(firstLesson.id)}
-                          className="w-full bg-white rounded-xl py-3 px-4 flex items-center justify-center gap-2 font-medium text-brand-purple-600 hover:bg-gray-50 transition-colors relative z-10"
+                          className="w-full bg-background rounded-xl py-3 px-4 flex items-center justify-center gap-2 font-medium text-brand-purple-600 hover:bg-muted transition-colors relative z-10"
                         >
                           {isCompleted ? 'Review' : progress > 0 ? 'Continue' : 'Start'}
                           <ArrowRight className="w-4 h-4" />
@@ -189,7 +189,7 @@ export function CourseRoadmap({
             {index < chapters.length - 1 && (
               <div className={cn(
                 "w-0.5 h-4",
-                isCompleted ? "bg-amber-300" : "bg-gray-200 dark:bg-gray-700"
+                isCompleted ? "bg-amber-300" : "bg-border"
               )} />
             )}
           </div>

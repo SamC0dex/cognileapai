@@ -1,8 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import { motion } from 'framer-motion'
-import { ArrowLeft, BookOpen, Clock, Loader2, CheckCircle2, Sparkles } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ArrowLeft, BookOpen, Loader2, CheckCircle2, Sparkles, Lightbulb } from 'lucide-react'
 import { Button } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import type { Course, Chapter, GenerationProgress } from '@/lib/course-store'
@@ -15,6 +15,32 @@ interface CourseGeneratingViewProps {
   onRefresh: () => void
 }
 
+const STUDY_TIPS = [
+  { icon: '🧠', text: 'Spaced repetition is 50% more effective than cramming. Review what you learn tomorrow, then in 3 days.' },
+  { icon: '✍️', text: 'Writing notes by hand improves retention by 29% compared to typing.' },
+  { icon: '🎯', text: 'The Pomodoro Technique: 25 minutes of focus, 5-minute break. Your brain needs rest to consolidate.' },
+  { icon: '💤', text: 'Sleep is when your brain moves information from short-term to long-term memory. Don\'t skip it!' },
+  { icon: '🏃', text: 'A 20-minute walk before studying can improve focus and memory by up to 20%.' },
+  { icon: '🎵', text: 'Ambient background noise (like a coffee shop) can boost creative thinking. Try lo-fi beats while studying.' },
+  { icon: '📱', text: 'Just having your phone visible reduces cognitive capacity by 10%. Put it in another room while learning.' },
+  { icon: '🧩', text: 'Teaching someone else is the best way to learn. Try explaining what you learned to a friend.' },
+  { icon: '🌊', text: 'Your brain processes information in waves. Short study sessions with breaks beat marathon sessions.' },
+  { icon: '🎨', text: 'Color-coding your notes activates visual memory pathways. Use colors to categorize concepts.' },
+  { icon: '⚡', text: 'Active recall (testing yourself) is 3x more effective than re-reading your notes.' },
+  { icon: '🌅', text: 'Most people learn best in the morning. Schedule your hardest material for when you\'re fresh.' },
+]
+
+const GENERATION_MESSAGES = [
+  'Analyzing your document...',
+  'Identifying key concepts...',
+  'Structuring the learning path...',
+  'Creating engaging content...',
+  'Building quiz questions...',
+  'Adding diagrams and visuals...',
+  'Optimizing for your learning style...',
+  'Polishing the final touches...',
+]
+
 export function CourseGeneratingView({
   course,
   chapters,
@@ -23,6 +49,7 @@ export function CourseGeneratingView({
 }: CourseGeneratingViewProps) {
   const router = useRouter()
   const [timeElapsed, setTimeElapsed] = React.useState(0)
+  const [currentTipIndex, setCurrentTipIndex] = React.useState(0)
   const startTimeRef = React.useRef(Date.now())
   
   // Track elapsed time
@@ -30,6 +57,14 @@ export function CourseGeneratingView({
     const interval = setInterval(() => {
       setTimeElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000))
     }, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Rotate study tips every 8 seconds
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTipIndex(prev => (prev + 1) % STUDY_TIPS.length)
+    }, 8000)
     return () => clearInterval(interval)
   }, [])
   
@@ -46,9 +81,32 @@ export function CourseGeneratingView({
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
   }
   
-  const unitsCompleted = (progress as any).unitsCompleted || 0
-  const unitsTotal = (progress as any).unitsTotal || chapters.length || 1
+  const unitsCompleted = (progress as { unitsCompleted?: number }).unitsCompleted || 0
+  const unitsTotal = (progress as { unitsTotal?: number }).unitsTotal || chapters.length || 1
   const isComplete = progress.phase === 'complete'
+
+  // Estimate time remaining based on rate
+  const estimatedTimeRemaining = React.useMemo(() => {
+    if (isComplete || unitsCompleted === 0 || timeElapsed === 0) return null
+    const avgTimePerUnit = timeElapsed / unitsCompleted
+    const remaining = Math.ceil(avgTimePerUnit * (unitsTotal - unitsCompleted))
+    if (remaining <= 0) return null
+    const mins = Math.floor(remaining / 60)
+    const secs = remaining % 60
+    return mins > 0 ? `~${mins}m ${secs}s remaining` : `~${secs}s remaining`
+  }, [unitsCompleted, unitsTotal, timeElapsed, isComplete])
+
+  // Dynamic generation message
+  const generationMessage = React.useMemo(() => {
+    if (isComplete) return 'Course ready!'
+    const msgIndex = Math.min(
+      Math.floor((progress.percentage / 100) * GENERATION_MESSAGES.length),
+      GENERATION_MESSAGES.length - 1
+    )
+    return GENERATION_MESSAGES[msgIndex]
+  }, [progress.percentage, isComplete])
+
+  const currentTip = STUDY_TIPS[currentTipIndex]
   
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/10">
@@ -99,7 +157,7 @@ export function CourseGeneratingView({
               )}
               <div>
                 <p className="font-semibold text-foreground">
-                  {isComplete ? 'Course Ready!' : 'Creating Your Course...'}
+                  {isComplete ? 'Course Ready!' : generationMessage}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {progress.currentStep}
@@ -127,7 +185,9 @@ export function CourseGeneratingView({
           
           <div className="flex justify-between mt-2 text-xs text-muted-foreground">
             <span>{progress.percentage}% complete</span>
-            <span>{formatTime(timeElapsed)} elapsed</span>
+            <span>
+              {estimatedTimeRemaining ? estimatedTimeRemaining : `${formatTime(timeElapsed)} elapsed`}
+            </span>
           </div>
         </motion.div>
         
@@ -224,25 +284,55 @@ export function CourseGeneratingView({
           </div>
         </div>
         
-        {/* Tips */}
+        {/* Start Learning Tip */}
+        {!isComplete && unitsCompleted > 0 && (
+          <motion.div
+            className="mt-6 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="flex gap-3">
+              <span className="text-xl">🚀</span>
+              <div>
+                <p className="font-medium text-foreground mb-1">
+                  Jump in — {unitsCompleted} {unitsCompleted === 1 ? 'unit is' : 'units are'} ready!
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Start learning now. We&apos;ll keep building the rest in the background.
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Rotating Study Tips */}
         {!isComplete && (
           <motion.div
-            className="mt-8 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20"
+            className="mt-4 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5 }}
           >
-            <div className="flex gap-3">
-              <span className="text-xl">💡</span>
-              <div>
-                <p className="font-medium text-foreground mb-1">
-                  You can start learning!
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Units become available as they're created. Start with the first unit while we prepare the rest!
-                </p>
-              </div>
+            <div className="flex items-center gap-2 mb-3 text-sm font-semibold text-blue-600 dark:text-blue-400">
+              <Lightbulb className="h-4 w-4" />
+              <span>Study Tip</span>
             </div>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentTipIndex}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+                className="flex gap-3"
+              >
+                <span className="text-xl flex-shrink-0">{currentTip.icon}</span>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {currentTip.text}
+                </p>
+              </motion.div>
+            </AnimatePresence>
           </motion.div>
         )}
       </div>

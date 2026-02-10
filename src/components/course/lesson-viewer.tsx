@@ -31,31 +31,74 @@ export function LessonViewer({
       if (!contentRef.current) return
 
       try {
-        // Temporarily disabled due to d3-array compatibility issues
-        // Will re-enable once mermaid dependency is fixed
+        // Dynamic import to avoid SSR issues
+        const mermaid = (await import('mermaid')).default
+
+        // Initialize Mermaid with interactive config
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'base',
+          themeVariables: {
+            primaryColor: '#14b8a6',
+            primaryTextColor: '#fff',
+            primaryBorderColor: '#0d9488',
+            lineColor: '#64748b',
+            secondaryColor: '#8b5cf6',
+            tertiaryColor: '#f59e0b',
+            background: '#ffffff',
+            mainBkg: '#e0f2fe',
+            secondBkg: '#ddd6fe',
+            fontSize: '16px',
+            fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+          },
+          securityLevel: 'loose',
+          flowchart: {
+            useMaxWidth: true,
+            htmlLabels: true,
+            curve: 'basis'
+          }
+        })
+
         const mermaidDivs = contentRef.current.querySelectorAll('.mermaid')
-      
+
         if (mermaidDivs.length > 0) {
-          mermaidDivs.forEach((div) => {
-            if (div.getAttribute('data-processed') === 'true') return
-            
+          for (let i = 0; i < mermaidDivs.length; i++) {
+            const div = mermaidDivs[i] as HTMLElement
+
+            if (div.getAttribute('data-processed') === 'true') continue
+
             const code = div.textContent || ''
-            
-            // Show placeholder for now
-            div.innerHTML = `<div class="p-6 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-xl">
-              <div class="flex items-center gap-3 mb-3">
-                <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span class="font-semibold text-blue-900 dark:text-blue-100">Visual Diagram</span>
-              </div>
-              <pre class="text-sm text-muted-foreground whitespace-pre-wrap font-mono bg-muted/50 p-3 rounded-lg overflow-x-auto">${code}</pre>
-            </div>`
-            div.setAttribute('data-processed', 'true')
-          })
+            const id = `mermaid-${Date.now()}-${i}`
+
+            try {
+              const { svg } = await mermaid.render(id, code)
+
+              div.innerHTML = `
+                <div class="mermaid-container my-8 p-6 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-lg">
+                  <div class="mermaid-diagram flex justify-center overflow-x-auto">
+                    ${svg}
+                  </div>
+                  <p class="text-center text-sm text-muted-foreground mt-4">Click on diagram elements to explore</p>
+                </div>
+              `
+
+              div.setAttribute('data-processed', 'true')
+            } catch (renderError) {
+              console.error('Mermaid rendering error:', renderError)
+              div.innerHTML = `
+                <div class="p-6 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-xl">
+                  <div class="flex items-center gap-3 mb-3">
+                    <span class="font-semibold text-red-900 dark:text-red-100">Diagram Error</span>
+                  </div>
+                  <pre class="text-sm text-muted-foreground whitespace-pre-wrap font-mono bg-muted/50 p-3 rounded-lg overflow-x-auto">${code}</pre>
+                </div>
+              `
+              div.setAttribute('data-processed', 'true')
+            }
+          }
         }
       } catch (error) {
-        console.error('Diagram rendering error:', error)
+        console.error('Mermaid initialization error:', error)
       }
     }
 

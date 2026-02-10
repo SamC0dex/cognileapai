@@ -17,6 +17,10 @@ export interface Course {
   customInstructions?: string // NEW: user customizations
   createdAt: string
   updatedAt: string
+  progress?: {
+    completionPercentage: number
+    lessonsCompleted: number
+  }
 }
 
 export interface GenerationProgress {
@@ -54,7 +58,7 @@ export interface Lesson {
   learningObjective: string
   contentMarkdown: string
   images: LessonImage[]
-  interactiveElements: Record<string, any>
+  interactiveElements: Record<string, unknown>
   videos: LessonVideo[]
   orderIndex: number
   lessonNumber: string
@@ -124,6 +128,16 @@ export interface ActiveGeneration {
   statusMessage: string
 }
 
+export interface ExistingCourseInfo {
+  id: string
+  title: string
+  status: string
+  createdAt: string
+  totalLessons: number
+  totalChapters: number
+  totalExisting: number
+}
+
 // Store interface
 interface CourseStore {
   // State
@@ -151,7 +165,8 @@ interface CourseStore {
   fetchLessonContent: (lessonId: string) => Promise<void>
   fetchUserProgress: (courseId: string) => Promise<void>
 
-  startGeneration: (documentId: string, courseTitle: string, customInstructions?: string) => Promise<string | null>
+  checkExistingCourse: (documentId: string) => Promise<ExistingCourseInfo | null>
+  startGeneration: (documentId: string, courseTitle: string, customInstructions?: string, forceNew?: boolean) => Promise<string | null>
   pollGenerationProgress: (courseId: string) => Promise<void>
   updateGenerationProgress: (progress: number, message: string) => void
   completeGeneration: (course: Course) => void
@@ -250,7 +265,7 @@ export const useCourseStore = create<CourseStore>()(
           }
 
           // Transform quiz data
-          const quiz: QuizQuestion[] = data.quiz.map((q: any) => ({
+          const quiz: QuizQuestion[] = data.quiz.map((q: Record<string, unknown>) => ({
             id: q.id,
             lessonId: q.lessonId,
             question: q.question,
@@ -287,7 +302,35 @@ export const useCourseStore = create<CourseStore>()(
         }
       },
 
-      startGeneration: async (documentId: string, courseTitle: string, customInstructions?: string) => {
+      checkExistingCourse: async (documentId: string) => {
+        try {
+          const response = await fetch('/api/courses/check-existing', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ documentId }),
+          })
+
+          if (!response.ok) {
+            return null
+          }
+
+          const data = await response.json()
+          
+          if (data.exists && data.course) {
+            return {
+              ...data.course,
+              totalExisting: data.totalExisting || 1
+            } as ExistingCourseInfo
+          }
+          
+          return null
+        } catch (error) {
+          console.error('Error checking existing course:', error)
+          return null
+        }
+      },
+
+      startGeneration: async (documentId: string, courseTitle: string, customInstructions?: string, forceNew?: boolean) => {
         try {
           // Set initial generating state
           set({
@@ -306,7 +349,7 @@ export const useCourseStore = create<CourseStore>()(
           const response = await fetch('/api/courses/generate-fast', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ documentId, customInstructions }),
+            body: JSON.stringify({ documentId, customInstructions, forceNew }),
           })
 
           if (!response.ok) {
@@ -334,7 +377,7 @@ export const useCourseStore = create<CourseStore>()(
           get().pollGenerationProgress(courseId)
 
           return courseId
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error('Error starting generation:', error)
           set({
             isGenerating: false,
@@ -518,7 +561,7 @@ export const useCourseStore = create<CourseStore>()(
         userProgress: state.userProgress,
         userStreak: state.userStreak,
       }),
-      migrate: (persistedState: any, version: number) => {
+      migrate: (persistedState: unknown, version: number) => {
         // Clear old cached data if upgrading from version < 2
         if (version < 2) {
           return {

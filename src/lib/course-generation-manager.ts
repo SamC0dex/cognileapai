@@ -19,7 +19,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import {
   COURSE_PROMPTS,
   fillPromptTemplate,
@@ -27,6 +27,30 @@ import {
   estimateTokens,
   calculateLessonBatchSize
 } from './course-prompts'
+
+// Database types for Supabase queries
+interface DbLesson {
+  id: string
+  title: string
+  learning_objective: string
+  content_markdown: string
+  estimated_minutes: number
+}
+
+interface DbQuiz {
+  lesson_id: string
+  question: string
+  correct_answer: string
+  explanation: string
+}
+
+interface DbChapter {
+  id: string
+}
+
+interface DbCourse {
+  id: string
+}
 
 // ============================================
 // Types & Interfaces
@@ -156,7 +180,7 @@ export class AllModelsOverloadedError extends Error {
 
 export class CourseGenerationManager {
   private genai: GoogleGenAI
-  private supabase: ReturnType<typeof createClient>
+  private supabase: SupabaseClient
   private currentProgress: GenerationProgress
 
   // Model hierarchy (fallback chain)
@@ -361,7 +385,7 @@ export class CourseGenerationManager {
         .select('id')
         .eq('course_id', courseId)
         .eq('order_index', chapter.orderIndex)
-        .single()
+        .single() as { data: DbChapter | null }
 
       if (!chapterRecord) {
         throw new CourseGenerationError(`Chapter not found: ${chapter.title}`, 'lessons', true)
@@ -457,7 +481,7 @@ export class CourseGenerationManager {
       .from('lessons')
       .select('id, title, learning_objective, content_markdown')
       .eq('course_id', courseId)
-      .order('order_index', { ascending: true })
+      .order('order_index', { ascending: true }) as { data: DbLesson[] | null }
 
     if (!lessons || lessons.length === 0) {
       throw new CourseGenerationError('No lessons found for quiz generation', 'quizzes', true)
@@ -558,12 +582,12 @@ export class CourseGenerationManager {
       .from('lessons')
       .select('id, title, content_markdown, estimated_minutes')
       .eq('course_id', courseId)
-      .order('order_index', { ascending: true })
+      .order('order_index', { ascending: true }) as { data: DbLesson[] | null }
 
     const { data: quizzes } = await this.supabase
       .from('lesson_quizzes')
       .select('lesson_id, question, correct_answer, explanation')
-      .in('lesson_id', lessons?.map(l => l.id) || [])
+      .in('lesson_id', lessons?.map(l => l.id) || []) as { data: DbQuiz[] | null }
 
     if (!lessons || lessons.length === 0) {
       console.warn('[CourseGeneration] No lessons found for verification')
@@ -634,7 +658,7 @@ Provide your verification results:`
         }
       })
 
-      const responseText = response.text
+      const responseText = response.text || ''
 
       // Parse verification results
       const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
@@ -655,7 +679,7 @@ Provide your verification results:`
       }, onProgress)
 
       // Store verification results in course metadata
-      await this.supabase
+      await (this.supabase
         .from('courses')
         .update({
           metadata: {
@@ -663,8 +687,8 @@ Provide your verification results:`
             verifiedAt: new Date().toISOString(),
             qaModel: 'gemini-2.5-flash-lite'
           }
-        })
-        .eq('id', courseId)
+        } as Record<string, unknown>)
+        .eq('id', courseId))
 
       // Log warnings if quality is not excellent
       if (verificationResults.overallQuality !== 'excellent') {
@@ -694,7 +718,7 @@ Provide your verification results:`
     }, onProgress)
 
     // Update course status to 'ready'
-    await this.supabase
+    await (this.supabase
       .from('courses')
       .update({
         status: 'ready',
@@ -704,8 +728,8 @@ Provide your verification results:`
           currentStep: 'Course ready!',
           completedAt: new Date().toISOString()
         }
-      })
-      .eq('id', courseId)
+      } as Record<string, unknown>)
+      .eq('id', courseId))
 
     this.updateProgress({
       phase: 'complete',
@@ -769,9 +793,10 @@ Provide your verification results:`
           console.log(`[CourseGeneration] Success with ${modelConfig.name}`)
           return responseText
 
-        } catch (error: any) {
-          console.error(`[CourseGeneration] Error with ${modelConfig.name}:`, error.message)
-          lastError = error
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          console.error(`[CourseGeneration] Error with ${modelConfig.name}:`, errorMessage)
+          lastError = error instanceof Error ? error : new Error(String(error))
 
           // Classify error
           const errorType = this.classifyError(error)
@@ -796,7 +821,7 @@ Provide your verification results:`
     console.error('[CourseGeneration] All models failed')
 
     // Update course status to error
-    await this.supabase
+    await (this.supabase
       .from('courses')
       .update({
         status: 'error',
@@ -806,8 +831,8 @@ Provide your verification results:`
           currentStep: 'Generation failed',
           error: lastError?.message || 'Unknown error'
         }
-      })
-      .eq('id', courseId)
+      } as Record<string, unknown>)
+      .eq('id', courseId))
 
     throw new AllModelsOverloadedError('All AI models are currently overloaded. Please try again in a few minutes.')
   }
@@ -829,9 +854,9 @@ Provide your verification results:`
           percentage: 0,
           currentStep: 'Starting generation...'
         }
-      })
+      } as Record<string, unknown>)
       .select('id')
-      .single()
+      .single() as { data: DbCourse | null; error: unknown }
 
     if (error || !data) {
       throw new CourseGenerationError('Failed to create course record', 'outline', false)
@@ -846,14 +871,14 @@ Provide your verification results:`
         completion_percentage: 0,
         lessons_completed: 0,
         total_time_seconds: 0
-      })
+      } as Record<string, unknown>)
 
     return data.id
   }
 
   private async saveOutlineToDatabase(courseId: string, outline: CourseOutline): Promise<void> {
     // Update course metadata
-    await this.supabase
+    await (this.supabase
       .from('courses')
       .update({
         title: outline.courseTitle,
@@ -862,8 +887,8 @@ Provide your verification results:`
         estimated_hours: outline.estimatedHours,
         total_lessons: outline.totalLessons,
         total_chapters: outline.totalChapters
-      })
-      .eq('id', courseId)
+      } as Record<string, unknown>)
+      .eq('id', courseId))
 
     // Insert chapters (lessons will be added later)
     for (const chapter of outline.chapters) {
@@ -874,7 +899,7 @@ Provide your verification results:`
           title: chapter.title,
           description: chapter.description,
           order_index: chapter.orderIndex
-        })
+        } as Record<string, unknown>)
     }
   }
 
@@ -907,7 +932,7 @@ Provide your verification results:`
           images: [],
           interactive_elements: {},
           videos: []
-        })
+        } as Record<string, unknown>)
     }
   }
 
@@ -925,7 +950,7 @@ Provide your verification results:`
             explanation: question.explanation,
             difficulty: question.difficulty,
             order_index: question.orderIndex
-          })
+          } as Record<string, unknown>)
       }
     }
   }
@@ -976,7 +1001,7 @@ Provide your verification results:`
     // Strategy 3: Incremental parsing - extract valid objects one by one
     try {
       console.log('[CourseGeneration] Strategy 3: Incremental parsing')
-      let cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
 
       // Find the array start
       const arrayStart = cleaned.indexOf('[')
@@ -1112,7 +1137,7 @@ Provide your verification results:`
     // Strategy 3: Incremental parsing - extract valid objects one by one
     try {
       console.log('[CourseGeneration] Quiz Strategy 3: Incremental parsing')
-      let cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+      const cleaned = responseText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
 
       const arrayStart = cleaned.indexOf('[')
       if (arrayStart === -1) throw new Error('No array found')
@@ -1218,8 +1243,8 @@ Provide your verification results:`
     }
   }
 
-  private classifyError(error: any): string {
-    const errorMessage = error.message?.toLowerCase() || error.toString().toLowerCase()
+  private classifyError(error: unknown): string {
+    const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
 
     if (errorMessage.includes('overloaded') || errorMessage.includes('503')) {
       return 'overloaded'

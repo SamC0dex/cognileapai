@@ -100,6 +100,9 @@ export interface UnitOutline {
   description: string
   orderIndex: number
   lessonCount: number
+  unitType?: 'intro' | 'concept' | 'process' | 'application' | 'summary'
+  needsDiagram?: boolean
+  needsQuiz?: boolean
 }
 
 export interface GeneratedUnit {
@@ -118,31 +121,78 @@ export interface UnitStep {
   explanation?: string
 }
 
-// Prompts - Optimized for source accuracy and micro-learning
-const OUTLINE_PROMPT = `Analyze this document and create a course outline.
+// Prompts - Optimized for engagement, ADHD-friendly design, and source accuracy
+const OUTLINE_PROMPT = `You are CogniLeap's AI course architect — you design courses that are impossible to ignore.
+
+=== YOUR DESIGN PHILOSOPHY ===
+You build courses for learners with short attention spans. Every unit must EARN the learner's attention through:
+- **Chunking**: Small, focused units (one concept per unit)
+- **Novelty**: Each unit opens with something unexpected — a question, a surprising fact, a "what if" scenario
+- **Dopamine hooks**: Progress feels rewarding, not draining
+- **Active recall**: Quizzes test understanding, not memorization
+- **Spaced repetition**: Later units reference earlier concepts
 
 === SOURCE ACCURACY (CRITICAL) ===
-- ONLY create units for topics that EXPLICITLY appear in the document
+- ONLY create units for topics EXPLICITLY in the document
 - Use the document's own terminology and section headings
-- Do NOT invent topics not in the source
+- Do NOT invent or assume topics not in the source
+
+=== INTELLIGENT UNIT TYPES ===
+Mark each unit with its type for smart content generation:
+
+1. **intro** - Course introduction/overview (NO quizzes, NO complex diagrams)
+   - Hook the learner immediately — why should they care?
+   - Course goals, what you'll be able to DO after this
+
+2. **concept** - Teaching new concepts (diagrams helpful, quizzes appropriate)
+   - Definitions, explanations, theory
+   - Diagrams: flowcharts, mind maps for relationships
+
+3. **process** - Step-by-step procedures (diagrams essential, quizzes appropriate)
+   - How-to content, workflows, algorithms
+   - Diagrams: flowcharts, sequence diagrams
+
+4. **application** - Practical examples/case studies (diagrams optional, quizzes appropriate)
+   - Real-world scenarios, examples
+   - Diagrams only if they clarify the example
+
+5. **summary** - Review/conclusion (NO quizzes in final summary, recap diagram optional)
+   - Key takeaways, next steps
+   - Light content, no testing
+
+=== ENGAGEMENT TYPES ===
+Assign an engagementType to each unit to vary pacing:
+- **story**: Open with a narrative or real-world scenario
+- **challenge**: Open with a problem to solve or a question to ponder
+- **visual**: Lead with a diagram or visual metaphor
+- **explore**: Let the learner discover the concept through guided exploration
 
 === STRUCTURE ===
 - Create 3-8 units based on document sections
-- Each unit: 10-15 minutes
-- Order from foundational to advanced
+- First unit should be "intro" type (brief, hooks the learner)
+- Last unit can be "summary" type if document has conclusion
+- Core units: "concept", "process", or "application" based on content
+- Each unit: 8-15 minutes
+- VARY engagement types — don't repeat the same type consecutively
 
 OUTPUT FORMAT (JSON only):
 {
-  "title": "Course title based on document (max 50 chars)",
-  "description": "One sentence description",
+  "title": "Course title (max 50 chars)",
+  "description": "One engaging sentence",
   "difficulty": "beginner|intermediate|advanced",
   "estimatedMinutes": <total>,
   "units": [
     {
-      "title": "Unit title (from document)",
+      "title": "Unit title",
       "description": "What this unit covers",
       "orderIndex": 0,
-      "lessonCount": 1
+      "lessonCount": 1,
+      "unitType": "intro|concept|process|application|summary",
+      "engagementType": "story|challenge|visual|explore",
+      "hook": "An engaging opener question or surprising fact for this unit",
+      "keyTakeaway": "One sentence: the single most important thing to remember",
+      "needsDiagram": true/false,
+      "needsQuiz": true/false
     }
   ]
 }
@@ -150,27 +200,89 @@ OUTPUT FORMAT (JSON only):
 DOCUMENT:
 `
 
-const UNIT_CONTENT_PROMPT = `Create micro-learning content for this unit.
+const UNIT_CONTENT_PROMPT = `You are CogniLeap's content writer. You create micro-learning content that grabs attention and never lets go.
 
-=== MICRO-LEARNING FORMAT ===
+=== UNIT CONTEXT ===
+Unit Type: {unitType}
+Needs Diagram: {needsDiagram}
+Needs Quiz: {needsQuiz}
 
-CONTENT STEPS (create 4-6):
-- 60-120 words MAX
-- ONE key concept per step
-- Use bullet points
-- Add emoji (📌 💡 ⚡) for visual breaks
-- Simple language only
+=== ATTENTION RULES (EVERY STEP MUST FOLLOW THESE) ===
+1. **START strong** — every step opens with a hook: a bold statement, a question, a "Did you know?", or a surprising fact
+2. **ONE concept per step** — never overload
+3. **Use analogies** — relate every abstract concept to something concrete and real-world
+4. **Bold key terms** — make scanning easy
+5. **Use callout types** for variety:
+   - 💡 **Did You Know?** — surprising facts for dopamine hits
+   - ⚡ **Pro Tip** — advanced insights or shortcuts
+   - ⚠️ **Common Mistake** — what most people get wrong
+   - 📌 **Key Point** — the essential takeaway
 
-QUIZ STEPS (create 2-3):
-- After every 2 content steps
-- Test what was JUST taught
-- 4 options, clear correct answer
-- Brief explanation
+=== CONTENT RULES BY UNIT TYPE ===
+
+**intro** (Introduction units):
+- 3-4 content steps that hook the learner immediately
+- NO quizzes - this is orientation only
+- NO complex diagrams - maybe a simple overview visual
+- Confident, direct tone — tell them exactly what they'll master
+- Focus: Why this matters, what you'll be able to DO
+
+**concept** (Theory/Definition units):
+- 4-5 content steps explaining the concept with real-world analogies
+- 1-2 quizzes — scenario-based, not just recall
+- Diagrams: mind maps or flowcharts showing relationships
+- Include at least one "Did You Know?" callout
+- Focus: Clear explanations with concrete examples
+
+**process** (How-to/Procedure units):
+- 4-6 content steps walking through the process
+- 1-2 quizzes on applying the steps to a scenario
+- Diagrams: flowcharts or sequence diagrams (ESSENTIAL)
+- Include a "Common Mistake" callout
+- Focus: Step-by-step clarity with practical context
+
+**application** (Examples/Case Studies):
+- 3-5 content steps with real, vivid examples
+- 1-2 quizzes that present new scenarios to solve
+- Diagrams: only if they clarify the example
+- Include a "Pro Tip" callout
+- Focus: Practical understanding through stories
+
+**summary** (Review/Conclusion):
+- 2-3 recap content steps
+- NO quizzes - this is reflection only
+- Maybe one recap diagram summarizing key points
+- Focus: Key takeaways, what to remember, next steps
+
+=== QUIZ DESIGN (when needsQuiz is true) ===
+- Questions must be **scenario-based**: "Imagine you're..." or "A company needs to..."
+- NEVER just ask "What is X?" — ask "When would you use X?" or "What happens if X fails?"
+- 4 options, one clearly correct
+- Explanation must include **why** the correct answer works AND why one popular wrong answer fails
+- Reference concepts from earlier units when possible (spaced repetition)
+
+=== CONTENT FORMATTING ===
+- 60-120 words per step
+- ONE concept per step
+- Use bullet points for clarity
+- **Bold** key terms on first use
+- Use blockquotes (>) for insights and callouts
+
+=== DIAGRAM STYLING (when needed) ===
+Use soft pastel colors, keep it SIMPLE (max 6 nodes):
+\`\`\`mermaid
+flowchart TD
+    A[Input]:::input --> B[Process]:::process
+    B --> C[Output]:::output
+
+    classDef input fill:#e0e7ff,stroke:#818cf8,stroke-width:2px
+    classDef process fill:#ddd6fe,stroke:#8b5cf6,stroke-width:2px
+    classDef output fill:#d1fae5,stroke:#34d399,stroke-width:2px
+\`\`\`
 
 === SOURCE ACCURACY ===
-- ONLY use facts from the SOURCE CONTENT below
-- Do NOT add external information
-- If source is insufficient, keep content brief
+- ONLY use facts from SOURCE CONTENT below
+- Do NOT invent information
 
 OUTPUT FORMAT (JSON only):
 {
@@ -179,18 +291,13 @@ OUTPUT FORMAT (JSON only):
   "steps": [
     {
       "type": "content",
-      "title": "Topic",
-      "content": "📌 **Key Point**\\n\\n• Fact one\\n• Fact two\\n\\nBrief explanation."
-    },
-    {
-      "type": "quiz",
-      "question": "Based on what you learned, which is true?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
-      "correctAnswer": "Option B",
-      "explanation": "B is correct because..."
+      "title": "Topic Title",
+      "content": "💡 **Did You Know?** Most people think X, but actually...\\n\\n**Key Term** means...\\n\\n> This matters because..."
     }
   ]
 }
+
+NOTE: Only include quiz steps if needsQuiz is true. Only include diagrams if needsDiagram is true.
 
 UNIT: {unitTitle}
 DESCRIPTION: {unitDescription}
@@ -327,10 +434,18 @@ export class FastCourseGenerator {
         // Extract relevant content for this unit
         const contentChunk = this.extractContentForUnit(documentContent, unit, outline.units.length)
         
-        // Generate unit content
+        // Determine unit type defaults if not specified
+        const unitType = unit.unitType || (unit.orderIndex === 0 ? 'intro' : 'concept')
+        const needsDiagram = unit.needsDiagram ?? (unitType !== 'intro' && unitType !== 'summary')
+        const needsQuiz = unit.needsQuiz ?? (unitType !== 'intro' && unitType !== 'summary')
+        
+        // Generate unit content with smart parameters
         const prompt = UNIT_CONTENT_PROMPT
           .replace('{unitTitle}', unit.title)
           .replace('{unitDescription}', unit.description)
+          .replace('{unitType}', unitType)
+          .replace('{needsDiagram}', String(needsDiagram))
+          .replace('{needsQuiz}', String(needsQuiz))
           + contentChunk
         
         const response = await withRetry(
@@ -354,7 +469,6 @@ export class FastCourseGenerator {
         const generatedUnit: GeneratedUnit = JSON.parse(cleaned)
         
         // Save lesson with step-based content
-        const contentSteps = generatedUnit.steps.filter(s => s.type === 'content')
         const quizSteps = generatedUnit.steps.filter(s => s.type === 'quiz')
         
         // Randomize quiz options in steps for interactive_elements storage
@@ -391,26 +505,28 @@ export class FastCourseGenerator {
         
         if (lessonError) throw lessonError
         
-        // Insert quiz questions with randomized options
-        for (let i = 0; i < quizSteps.length; i++) {
-          const q = quizSteps[i]
-          // Randomize option order to prevent predictable answer positions
-          const { options: shuffledOptions, correctAnswer } = randomizeQuizOptions(
-            q.options || [],
-            q.correctAnswer || ''
-          )
-          await this.supabase
-            .from('lesson_quizzes')
-            .insert({
-              lesson_id: lesson.id,
-              question: q.question || '',
-              question_type: 'multiple_choice',
-              options: shuffledOptions,
-              correct_answer: correctAnswer,
-              explanation: q.explanation || '',
-              difficulty: 'medium',
-              order_index: i
-            })
+        // Insert quiz questions only if this unit type needs quizzes
+        if (needsQuiz && quizSteps.length > 0) {
+          for (let i = 0; i < quizSteps.length; i++) {
+            const q = quizSteps[i]
+            // Randomize option order to prevent predictable answer positions
+            const { options: shuffledOptions, correctAnswer } = randomizeQuizOptions(
+              q.options || [],
+              q.correctAnswer || ''
+            )
+            await this.supabase
+              .from('lesson_quizzes')
+              .insert({
+                lesson_id: lesson.id,
+                question: q.question || '',
+                question_type: 'multiple_choice',
+                options: shuffledOptions,
+                correct_answer: correctAnswer,
+                explanation: q.explanation || '',
+                difficulty: 'medium',
+                order_index: i
+              })
+          }
         }
         
         // Update progress

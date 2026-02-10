@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
     
-    const { documentId, customInstructions } = await request.json()
+    const { documentId, customInstructions, forceNew } = await request.json()
     
     if (!documentId) {
       return NextResponse.json({ error: 'Document ID required' }, { status: 400 })
@@ -45,32 +45,34 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    // Check for existing course
-    const { data: existingCourse } = await supabase
-      .from('courses')
-      .select('id, status')
-      .eq('document_id', documentId)
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-    
-    if (existingCourse) {
-      if (existingCourse.status === 'generating') {
-        return NextResponse.json({
-          success: true,
-          courseId: existingCourse.id,
-          status: 'generating',
-          message: 'Course already being generated'
-        })
-      }
-      if (existingCourse.status === 'ready') {
-        return NextResponse.json({
-          success: true,
-          courseId: existingCourse.id,
-          status: 'ready',
-          message: 'Course already exists'
-        })
+    // Check for existing course (skip if forceNew is true)
+    if (!forceNew) {
+      const { data: existingCourse } = await supabase
+        .from('courses')
+        .select('id, status')
+        .eq('document_id', documentId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      
+      if (existingCourse) {
+        if (existingCourse.status === 'generating') {
+          return NextResponse.json({
+            success: true,
+            courseId: existingCourse.id,
+            status: 'generating',
+            message: 'Course already being generated'
+          })
+        }
+        if (existingCourse.status === 'ready') {
+          return NextResponse.json({
+            success: true,
+            courseId: existingCourse.id,
+            status: 'ready',
+            message: 'Course already exists'
+          })
+        }
       }
     }
     

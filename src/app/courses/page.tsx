@@ -102,7 +102,9 @@ export default function CoursesPage() {
   const totalLessons = readyCourses.reduce((sum, c) => sum + (c.totalLessons || 0), 0)
   const totalHours = readyCourses.reduce((sum, c) => sum + (c.estimatedHours || 0), 0)
   const currentStreak = userStreak?.currentStreak || 0
-  const completionRate = 0 // TODO: Calculate from actual progress
+  const completionRate = totalCourses > 0
+    ? Math.round(readyCourses.reduce((sum, c) => sum + (c.progress?.completionPercentage || 0), 0) / totalCourses)
+    : 0
 
   return (
     <DashboardLayout>
@@ -245,7 +247,7 @@ export default function CoursesPage() {
                         stroke="currentColor"
                         strokeWidth="10"
                         fill="none"
-                        className="text-gray-200 dark:text-gray-700"
+                        className="text-muted"
                       />
                       <circle
                         cx="60"
@@ -304,11 +306,6 @@ export default function CoursesPage() {
           >
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold">Your Courses</h2>
-              {totalCourses > 0 && (
-                <Button variant="ghost" size="sm">
-                  View All →
-                </Button>
-              )}
             </div>
 
             {loading ? (
@@ -355,7 +352,7 @@ export default function CoursesPage() {
                       <div className="relative h-32 bg-gradient-to-br from-teal-500/20 via-purple-500/20 to-blue-500/20">
                         <div className="absolute inset-0 bg-gradient-to-t from-background/90 to-transparent" />
                         <div className="absolute bottom-4 left-6">
-                          <div className="w-14 h-14 rounded-xl bg-white/90 dark:bg-gray-800/90 backdrop-blur flex items-center justify-center shadow-lg">
+                          <div className="w-14 h-14 rounded-xl bg-background/90 backdrop-blur flex items-center justify-center shadow-lg">
                             <BookOpen className="h-7 w-7 text-teal-600 dark:text-teal-400" />
                           </div>
                         </div>
@@ -419,10 +416,13 @@ export default function CoursesPage() {
                           <div className="space-y-2">
                             <div className="flex justify-between text-xs text-muted-foreground">
                               <span>Progress</span>
-                              <span>0%</span>
+                              <span>{course.progress?.completionPercentage || 0}%</span>
                             </div>
                             <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div className="h-full w-0 bg-gradient-to-r from-teal-500 to-purple-500" />
+                              <div
+                                className="h-full bg-gradient-to-r from-teal-500 to-purple-500 transition-all duration-500"
+                                style={{ width: `${course.progress?.completionPercentage || 0}%` }}
+                              />
                             </div>
                           </div>
                         </div>

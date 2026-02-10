@@ -489,7 +489,7 @@ export class SmartCourseGenerator {
     documentTitle: string,
     userId: string,
     documentId: string,
-    onProgress?: (progress: any) => void
+    onProgress?: (progress: Record<string, unknown>) => void
   ): Promise<string> {
     // Create generation plan
     const plan = createGenerationPlan(documentContent)
@@ -532,7 +532,7 @@ export class SmartCourseGenerator {
    */
   private async generateOneShot(
     documentContent: string,
-    onProgress?: (progress: any) => void
+    onProgress?: (progress: Record<string, unknown>) => void
   ): Promise<void> {
     console.log('[SmartGen] Using ONE_SHOT strategy')
     
@@ -553,7 +553,14 @@ export class SmartCourseGenerator {
     
     const responseText = response.text || ''
     if (!responseText) throw new Error('Empty response from model')
-    const course = this.parseJSON(responseText)
+    
+    interface OneShotCourse {
+      title: string
+      description: string
+      difficulty: 'beginner' | 'intermediate' | 'advanced'
+      units: GeneratedUnit[]
+    }
+    const course = this.parseJSON<OneShotCourse>(responseText)
     
     await this.updateProgress(50, 'Saving course...', onProgress)
     
@@ -568,7 +575,7 @@ export class SmartCourseGenerator {
     }
     
     // Update course metadata
-    await this.supabase
+    await (this.supabase
       .from('courses')
       .update({
         title: course.title,
@@ -576,8 +583,8 @@ export class SmartCourseGenerator {
         difficulty: course.difficulty,
         total_chapters: course.units.length,
         total_lessons: course.units.length
-      })
-      .eq('id', this.state!.courseId)
+      } as Record<string, unknown>)
+      .eq('id', this.state!.courseId))
   }
   
   /**
@@ -586,7 +593,7 @@ export class SmartCourseGenerator {
   private async generateMultiPart(
     documentContent: string,
     plan: GenerationPlan,
-    onProgress?: (progress: any) => void
+    onProgress?: (progress: Record<string, unknown>) => void
   ): Promise<void> {
     console.log(`[SmartGen] Using ${plan.strategy} strategy`)
     
@@ -706,7 +713,7 @@ export class SmartCourseGenerator {
       }
     })
     
-    return this.parseJSON(response.text || '') as CourseOutline
+    return this.parseJSON<CourseOutline>(response.text || '')
   }
   
   /**
@@ -754,7 +761,7 @@ export class SmartCourseGenerator {
       }
     })
     
-    const generatedUnit = this.parseJSON(response.text || '') as GeneratedUnit
+    const generatedUnit = this.parseJSON<GeneratedUnit>(response.text || '')
     await this.saveUnit(generatedUnit, unitIndex)
     
     this.state!.unitsInProgress.delete(unitIndex)
@@ -772,16 +779,16 @@ export class SmartCourseGenerator {
       .select('id')
       .eq('course_id', courseId)
       .eq('order_index', orderIndex)
-      .single()
+      .single() as { data: { id: string } | null }
     
     let chapterId: string
     if (chapter) {
       chapterId = chapter.id
       // Update chapter
-      await this.supabase
+      await (this.supabase
         .from('chapters')
-        .update({ title: unit.title, description: unit.description })
-        .eq('id', chapterId)
+        .update({ title: unit.title, description: unit.description } as Record<string, unknown>)
+        .eq('id', chapterId))
     } else {
       // Create chapter
       const { data: newChapter } = await this.supabase
@@ -791,9 +798,9 @@ export class SmartCourseGenerator {
           title: unit.title,
           description: unit.description,
           order_index: orderIndex
-        })
+        } as Record<string, unknown>)
         .select('id')
-        .single()
+        .single() as { data: { id: string } | null }
       chapterId = newChapter!.id
     }
     
@@ -821,9 +828,9 @@ export class SmartCourseGenerator {
         images: [],
         interactive_elements: { steps: unit.steps },
         videos: []
-      })
+      } as Record<string, unknown>)
       .select('id')
-      .single()
+      .single() as { data: { id: string } | null }
     
     // Create quiz questions with randomized options
     for (let i = 0; i < quizSteps.length; i++) {
@@ -844,7 +851,7 @@ export class SmartCourseGenerator {
           explanation: q.explanation || '',
           difficulty: 'medium',
           order_index: i
-        })
+        } as Record<string, unknown>)
     }
   }
   
@@ -855,7 +862,7 @@ export class SmartCourseGenerator {
     const courseId = this.state!.courseId
     
     // Update course
-    await this.supabase
+    await (this.supabase
       .from('courses')
       .update({
         title: outline.title,
@@ -864,8 +871,8 @@ export class SmartCourseGenerator {
         estimated_hours: Math.ceil(outline.estimatedMinutes / 60),
         total_chapters: outline.units.length,
         total_lessons: outline.units.length
-      })
-      .eq('id', courseId)
+      } as Record<string, unknown>)
+      .eq('id', courseId))
     
     // Create placeholder chapters
     for (const unit of outline.units) {
@@ -876,7 +883,7 @@ export class SmartCourseGenerator {
           title: unit.title,
           description: unit.description,
           order_index: unit.orderIndex
-        })
+        } as Record<string, unknown>)
     }
   }
   
@@ -906,9 +913,9 @@ export class SmartCourseGenerator {
           currentStep: 'Starting...',
           strategy: plan.strategy
         }
-      })
+      } as Record<string, unknown>)
       .select('id')
-      .single()
+      .single() as { data: { id: string } | null; error: unknown }
     
     if (error) throw error
     
@@ -917,13 +924,13 @@ export class SmartCourseGenerator {
       .from('user_course_progress')
       .insert({
         user_id: userId,
-        course_id: data.id,
+        course_id: data!.id,
         completion_percentage: 0,
         lessons_completed: 0,
         total_time_seconds: 0
-      })
+      } as Record<string, unknown>)
     
-    return data.id
+    return data!.id
   }
   
   private async updateCourseStatus(
@@ -933,7 +940,7 @@ export class SmartCourseGenerator {
   ): Promise<void> {
     if (!this.state) return
     
-    await this.supabase
+    await (this.supabase
       .from('courses')
       .update({
         status,
@@ -944,14 +951,14 @@ export class SmartCourseGenerator {
           unitsCompleted: this.state.unitsCompleted.size,
           unitsTotal: this.state.outline?.units.length || this.state.plan.estimatedUnits
         }
-      })
-      .eq('id', this.state.courseId)
+      } as Record<string, unknown>)
+      .eq('id', this.state.courseId))
   }
   
   private async updateProgress(
     percentage: number,
     step: string,
-    onProgress?: (progress: any) => void
+    onProgress?: (progress: Record<string, unknown>) => void
   ): Promise<void> {
     if (!this.state) return
     
@@ -963,10 +970,10 @@ export class SmartCourseGenerator {
       unitsTotal: this.state.outline?.units.length || this.state.plan.estimatedUnits
     }
     
-    await this.supabase
+    await (this.supabase
       .from('courses')
-      .update({ generation_progress: progress })
-      .eq('id', this.state.courseId)
+      .update({ generation_progress: progress } as Record<string, unknown>)
+      .eq('id', this.state.courseId))
     
     if (onProgress) onProgress(progress)
   }
@@ -1005,7 +1012,7 @@ export class SmartCourseGenerator {
     }
   }
   
-  private parseJSON(text: string): any {
+  private parseJSON<T = unknown>(text: string): T {
     const cleaned = text
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
@@ -1014,10 +1021,10 @@ export class SmartCourseGenerator {
     // Find JSON object/array
     const match = cleaned.match(/[\[{][\s\S]*[\]}]/)
     if (match) {
-      return JSON.parse(match[0])
+      return JSON.parse(match[0]) as T
     }
     
-    return JSON.parse(cleaned)
+    return JSON.parse(cleaned) as T
   }
   
   private createDocumentSummaryContext(content: string): string {
@@ -1117,10 +1124,15 @@ OUTPUT (JSON only):
         }
       })
       
-      const result = this.parseJSON(response.text || '')
+      interface VerificationResult {
+        passed: boolean
+        issues?: string[]
+        overallScore?: number
+      }
+      const result = this.parseJSON<VerificationResult>(response.text || '')
       
       // Store verification results
-      await this.supabase
+      await (this.supabase
         .from('courses')
         .update({
           metadata: {
@@ -1130,8 +1142,8 @@ OUTPUT (JSON only):
               result
             }
           }
-        })
-        .eq('id', courseId)
+        } as Record<string, unknown>)
+        .eq('id', courseId))
       
       return {
         passed: result.passed,
