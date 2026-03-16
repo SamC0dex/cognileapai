@@ -30,7 +30,7 @@ export interface GenerateOptions {
   maxTokens?: number
   temperature?: number
   stream?: boolean
-  reasoningEffort?: 'low' | 'medium' | 'high'
+  reasoningEffort?: 'low' | 'high'
 }
 
 export interface StreamChunk {

@@ -83,7 +83,7 @@ interface StoreShape {
   setError: (err: string | null) => void
   setFriendlyError: (err: UserFacingError | null) => void
   setSelectedModel: (model: string) => void
-  setReasoningEffort: (effort: 'low' | 'medium' | 'high') => void
+  setReasoningEffort: (effort: 'low' | 'high') => void
   createNewConversation: (documentId?: string) => Promise<string>
   resetState: () => void
   clearErrorStates: () => void
@@ -156,7 +156,7 @@ export function useChatStore(): StoreShape {
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null)
   const [currentConversation, setCurrentConversation] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash')
-  const [reasoningEffort, setReasoningEffort] = useState<'low' | 'medium' | 'high'>('low')
+  const [reasoningEffort, setReasoningEffort] = useState<'low' | 'high'>('low')
   const [autoRetryState, setAutoRetryState] = useState<AutoRetryState | null>(null)
   const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null)
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import type { AIProvider } from './model-registry'
 import { DEFAULT_MODELS, PROVIDERS } from './model-registry'
 
-export type ReasoningEffort = 'low' | 'medium' | 'high'
+export type ReasoningEffort = 'low' | 'high'
 
 export interface UserAIPreferences {
   default_provider: AIProvider
@@ -19,9 +19,8 @@ export interface ChatModelOption {
   provider: AIProvider
 }
 
-// Kie.ai only supports low and high effort (no medium)
-const EFFORT_CYCLE_DEFAULT: ReasoningEffort[] = ['low', 'medium', 'high']
-const EFFORT_CYCLE_KIE: ReasoningEffort[] = ['low', 'high']
+// Kie.ai only supports low and high reasoning effort
+const EFFORT_CYCLE: ReasoningEffort[] = ['low', 'high']
 
 /**
  * Hook that loads user AI preferences and returns available models for the chat selector.
@@ -30,26 +29,24 @@ const EFFORT_CYCLE_KIE: ReasoningEffort[] = ['low', 'high']
 export function useUserPreferences() {
   const [preferences, setPreferences] = useState<UserAIPreferences | null>(null)
   const [loading, setLoading] = useState(true)
-  const [models, setModels] = useState<ChatModelOption[]>(getDefaultGeminiModels())
-  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-2.5-flash')
+  const [models, setModels] = useState<ChatModelOption[]>(getDefaultKieModels())
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-3-flash')
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('low')
 
   const cycleReasoningEffort = useCallback(() => {
-    const cycle = preferences?.default_provider === 'kie' ? EFFORT_CYCLE_KIE : EFFORT_CYCLE_DEFAULT
     setReasoningEffort(prev => {
-      const idx = cycle.indexOf(prev)
-      // If current value isn't in the cycle (e.g. 'medium' when switching to kie), reset to 'low'
-      const nextIdx = idx === -1 ? 0 : (idx + 1) % cycle.length
-      return cycle[nextIdx]
+      const idx = EFFORT_CYCLE.indexOf(prev)
+      const nextIdx = idx === -1 ? 0 : (idx + 1) % EFFORT_CYCLE.length
+      return EFFORT_CYCLE[nextIdx]
     })
-  }, [preferences?.default_provider])
+  }, [])
 
   const fetchPreferences = useCallback(async () => {
     try {
       const res = await fetch('/api/settings/preferences')
       if (!res.ok) {
-        setModels(getDefaultGeminiModels())
-        setSelectedModelId('gemini-2.5-flash')
+        setModels(getDefaultKieModels())
+        setSelectedModelId('gemini-3-flash')
         return
       }
 
@@ -73,16 +70,16 @@ export function useUserPreferences() {
           const defaultExists = chatModels.some(m => m.id === prefs.default_model)
           setSelectedModelId(defaultExists ? prefs.default_model : chatModels[0].id)
         } else {
-          setModels(getDefaultGeminiModels())
-          setSelectedModelId('gemini-2.5-flash')
+          setModels(getDefaultKieModels())
+          setSelectedModelId('gemini-3-flash')
         }
       } else {
-        setModels(getDefaultGeminiModels())
-        setSelectedModelId('gemini-2.5-flash')
+        setModels(getDefaultKieModels())
+        setSelectedModelId('gemini-3-flash')
       }
     } catch {
-      setModels(getDefaultGeminiModels())
-      setSelectedModelId('gemini-2.5-flash')
+      setModels(getDefaultKieModels())
+      setSelectedModelId('gemini-3-flash')
     } finally {
       setLoading(false)
     }
@@ -92,12 +89,6 @@ export function useUserPreferences() {
     fetchPreferences()
   }, [fetchPreferences])
 
-  // When provider changes to kie, clamp 'medium' effort down to 'low'
-  useEffect(() => {
-    if (preferences?.default_provider === 'kie') {
-      setReasoningEffort(prev => prev === 'medium' ? 'low' : prev)
-    }
-  }, [preferences?.default_provider])
 
   const providerInfo = preferences
     ? PROVIDERS[preferences.default_provider]
@@ -117,29 +108,13 @@ export function useUserPreferences() {
   }
 }
 
-/** Default 3 Gemini models that match the old hardcoded GEMINI_MODELS */
-function getDefaultGeminiModels(): ChatModelOption[] {
-  return [
-    {
-      id: 'gemini-2.5-flash-lite',
-      name: 'Gemini 2.5 Flash Lite',
-      description: 'Fastest model for simple queries and follow-ups',
-      costTier: 'low' as const,
-      provider: 'gemini' as AIProvider,
-    },
-    {
-      id: 'gemini-2.5-flash',
-      name: 'Gemini 2.5 Flash',
-      description: 'Balanced speed and capability for study materials',
-      costTier: 'medium' as const,
-      provider: 'gemini' as AIProvider,
-    },
-    {
-      id: 'gemini-2.5-pro',
-      name: 'Gemini 2.5 Pro',
-      description: 'Most capable for complex reasoning and analysis',
-      costTier: 'high' as const,
-      provider: 'gemini' as AIProvider,
-    },
-  ]
+/** Default Kie.ai models (gemini-3-flash is the primary default) */
+function getDefaultKieModels(): ChatModelOption[] {
+  return DEFAULT_MODELS.kie.map(m => ({
+    id: m.id,
+    name: m.name,
+    description: m.description,
+    costTier: m.costTier,
+    provider: m.provider,
+  }))
 }

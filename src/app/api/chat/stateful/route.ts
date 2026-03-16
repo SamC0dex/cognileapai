@@ -30,7 +30,7 @@ interface StatefulChatRequest {
   selectedDocuments?: Array<{id: string, title: string}>
   conversationId?: string
   preferredModel?: string
-  reasoningEffort?: 'low' | 'medium' | 'high'
+  reasoningEffort?: 'low' | 'high'
 }
 
 export async function POST(req: NextRequest) {
