@@ -85,7 +85,7 @@ const CitationLink: React.FC<{
 CitationLink.displayName = 'CitationLink'
 
 export const ChatMessage: React.FC<ChatMessageProps & {
-  onRegenerate?: (modelOverride?: import('../../lib/ai-config').GeminiModelKey) => void
+  onRegenerate?: (modelOverride?: string) => void
   onCopy?: (text: string) => void
   conversationTokens?: import('../../lib/token-manager').ConversationTokens
 }> = React.memo(({

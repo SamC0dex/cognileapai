@@ -1725,10 +1725,10 @@ const StudyToolsPanelContent: React.FC<{
     // Close dialog and focus on document selection
     setConfirmationDialog({ isOpen: false, studyToolType: null })
 
-    // TODO: Trigger document selection UI or navigate to documents panel
+    // TODO: Trigger document selection UI or navigate to files panel
     console.log('User requested to select a document')
 
-    // For now, we could expand a documents panel or show a file picker
+    // For now, we could expand a files panel or show a file picker
     // This would be integrated with the existing document management system
   }, [])
 

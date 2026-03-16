@@ -1,38 +1,38 @@
 // Pure configuration - no external dependencies needed
 
-// Gemini Model Definitions
+// Default Model Definitions (Kie.ai provider)
 export const GEMINI_MODELS = {
   // Ultra-fast for quick interactions
   FLASH_LITE: {
-    name: 'gemini-2.5-flash-lite',
-    displayName: 'Gemini 2.5 Flash Lite',
-    maxTokens: 800000, // 800K tokens input (leaving 200K for response)
+    name: 'gemini-2.5-flash',
+    displayName: 'Gemini 2.5 Flash',
+    maxTokens: 1000000,
     temperature: 0.7,
-    description: 'Fastest model for simple queries and follow-ups',
+    description: 'Fast model for simple queries and follow-ups',
     avgResponseTime: 150, // milliseconds
     costTier: 'low'
   },
-  
-  // Balanced for most tasks
+
+  // Balanced for most tasks (default)
   FLASH: {
-    name: 'gemini-2.5-flash',
-    displayName: 'Gemini 2.5 Flash',
-    maxTokens: 800000, // 800K tokens input (leaving 200K for response)
+    name: 'gemini-3-flash',
+    displayName: 'Gemini 3 Flash',
+    maxTokens: 1000000,
     temperature: 0.7,
-    description: 'Balanced speed and capability for study materials',
+    description: 'Best balance of speed, capability, and cost via Kie.ai',
     avgResponseTime: 500,
-    costTier: 'medium'
+    costTier: 'low'
   },
-  
+
   // Most capable for complex analysis
   PRO: {
-    name: 'gemini-2.5-pro',
-    displayName: 'Gemini 2.5 Pro',
-    maxTokens: 800000, // 800K tokens input (leaving 200K for response)
+    name: 'gemini-3-pro',
+    displayName: 'Gemini 3 Pro',
+    maxTokens: 1000000,
     temperature: 0.7,
     description: 'Most capable for complex reasoning and analysis',
     avgResponseTime: 2000,
-    costTier: 'high'
+    costTier: 'medium'
   }
 } as const
 
@@ -220,25 +220,24 @@ export class GeminiModelSelector {
 }
 
 // Utility function for environment validation
+// Checks for Kie.ai key first (preferred), then falls back to Google key
 export function validateGeminiConfig(): { isValid: boolean; error?: string } {
+  const kieKey = process.env.KIE_API_KEY
+  if (kieKey) {
+    return { isValid: true }
+  }
+
   const apiKey =
     process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
     process.env.GOOGLE_AI_API_KEY
-  
+
   if (!apiKey) {
     return {
       isValid: false,
-      error: 'Google Generative AI API key is missing. Set GOOGLE_GENERATIVE_AI_API_KEY (preferred) or GOOGLE_AI_API_KEY in your .env.local.'
+      error: 'No AI API key configured. Set KIE_API_KEY (preferred) or GOOGLE_GENERATIVE_AI_API_KEY in your .env.local.'
     }
   }
-  
-  if (!apiKey.startsWith('AIza')) {
-    return {
-      isValid: false,
-      error: 'GOOGLE_AI_API_KEY appears to be invalid. It should start with "AIza".'
-    }
-  }
-  
+
   return { isValid: true }
 }
 

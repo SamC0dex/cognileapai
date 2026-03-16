@@ -37,11 +37,11 @@ import { logOutAndClear } from '@/lib/auth-utils'
 interface SidebarProps {
   isCollapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
-  isDocumentsPanelOpen?: boolean
-  onDocumentsPanelToggle?: () => void
+  isFilesPanelOpen?: boolean
+  onFilesPanelToggle?: () => void
 }
 
-export function Sidebar({ isCollapsed = false, onCollapsedChange, isDocumentsPanelOpen = false, onDocumentsPanelToggle }: SidebarProps) {
+export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOpen = false, onFilesPanelToggle }: SidebarProps) {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { user, profile, loading } = useUser()
@@ -113,10 +113,10 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isDocumentsPan
       current: pathname?.startsWith('/courses') || false
     },
     {
-      name: 'Documents',
-      href: '/documents',
+      name: 'Files',
+      href: '/files',
       icon: FileText,
-      current: isDocumentsPanelOpen,
+      current: isFilesPanelOpen,
       isPanel: true
     },
     {
@@ -293,7 +293,7 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isDocumentsPan
               key={item.name}
               onClick={() => {
                 if (item.isPanel) {
-                  onDocumentsPanelToggle?.();
+                  onFilesPanelToggle?.();
                 } else {
                   console.log(`Direct navigation to ${item.href}`);
                   window.location.href = item.href;
@@ -365,7 +365,9 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isDocumentsPan
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56 app-dropdown">
-              <DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => { window.location.href = '/settings' }}
+              >
                 <User className="h-4 w-4 mr-2" />
                 Profile Settings
               </DropdownMenuItem>

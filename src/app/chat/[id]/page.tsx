@@ -8,9 +8,9 @@ import { ChatHistoryDrawer } from '@/components/chat-history-drawer'
 import { createThreadId, upsertThread, type ChatThread } from '@/lib/chat-history'
 import { useFlashcardStore } from '@/lib/flashcard-store'
 import { useStudyToolsStore } from '@/components/study-tools'
-import type { GeminiModelKey } from '@/lib/ai-config'
 import type { DocumentUploadedDetail } from '@/types/documents'
 import { GeminiLogo } from '@/components/icons/gemini-logo'
+import { useUserPreferences } from '@/lib/use-user-preferences'
 import type { ConversationTokens } from '@/lib/token-manager'
 import { ChatSettingsPopover } from '@/components/chat/chat-settings-popover'
 import { TokenUsageBadge } from '@/components/chat/token-usage-indicator'
@@ -26,7 +26,16 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [chatInstanceKey, setChatInstanceKey] = useState<string>('default')
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<GeminiModelKey>('FLASH')
+  // Load user AI preferences (provider, models, default selection)
+  const {
+    models: availableModels,
+    selectedModelId,
+    setSelectedModelId,
+    providerInfo,
+    reasoningEffort,
+    cycleReasoningEffort,
+    loading: preferencesLoading,
+  } = useUserPreferences()
   const [pageTitle, setPageTitle] = useState('CogniLeap AI Chat')
   const [documentId, setDocumentId] = useState<string | undefined>(undefined)
   const [chatType, setChatType] = useState<'course' | 'lesson' | 'document' | null>(null)
@@ -321,8 +330,12 @@ export default function ChatPage({ params }: ChatPageProps) {
             key={chatInstanceKey}
             documentId={documentId}
             conversationId={conversationId || undefined}
-            selectedModel={selectedModel}
-            onModelChange={setSelectedModel}
+            selectedModelId={selectedModelId}
+            onModelIdChange={setSelectedModelId}
+            availableModels={availableModels}
+            providerInfo={providerInfo}
+            reasoningEffort={reasoningEffort}
+            onCycleReasoningEffort={cycleReasoningEffort}
             onTokenUsageChange={setTokenUsage}
           />
         </div>

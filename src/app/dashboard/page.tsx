@@ -13,9 +13,9 @@ export default function DashboardPage() {
   const [isUploading] = useState(false)
 
   const handleUpload = useCallback(() => {
-    // First expand the documents panel to show upload progress
+    // First expand the files panel to show upload progress
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('expand-documents-panel'))
+      window.dispatchEvent(new CustomEvent('expand-files-panel'))
       // Small delay to let panel start opening, then trigger upload
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent('open-document-upload'))
@@ -25,7 +25,7 @@ export default function DashboardPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: () => {
-      // Instead of handling uploads here, delegate to documents panel
+      // Instead of handling uploads here, delegate to files panel
       handleUpload()
     },
     accept: { 'application/pdf': ['.pdf'] },

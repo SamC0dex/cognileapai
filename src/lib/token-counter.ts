@@ -1,11 +1,8 @@
 /**
- * Token Counting Service with Gemini API Integration
- * Provides accurate token counting using Google GenAI SDK's countTokens API
- * with intelligent caching and fallback to estimates
+ * Token Counting Service
+ * Uses character/word-based estimation for token counting.
+ * No longer depends on Google GenAI SDK — works with any provider (Kie.ai, OpenRouter, etc.)
  */
-
-import { GoogleGenAI } from '@google/genai'
-import type { Content } from '@google/genai'
 
 // Cache entry interface
 interface TokenCountCacheEntry {
@@ -25,7 +22,7 @@ export interface TokenCountResult {
 // Token counting parameters
 interface CountTokensParams {
   model: string
-  content: string | Content[]
+  content: string | Array<{ role: string; parts: Array<{ text: string }> }>
   systemInstruction?: string
 }
 
@@ -37,32 +34,16 @@ interface BatchCountItem {
 
 /**
  * Token Counting Service
- * Uses Gemini's countTokens API for accurate token counting with intelligent caching
+ * Uses estimation-based counting with intelligent caching
  */
 class TokenCountingService {
-  private client: GoogleGenAI | null = null
   private cache: Map<string, TokenCountCacheEntry>
   private readonly CACHE_TTL = 60 * 60 * 1000 // 1 hour
   private readonly MAX_CACHE_SIZE = 1000
 
   constructor() {
     this.cache = new Map()
-    this.initClient()
-  }
-
-  private initClient() {
-    try {
-      const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY
-      if (!apiKey) {
-        console.warn('[TokenCounter] Gemini API key not found, will use estimates')
-        return
-      }
-
-      this.client = new GoogleGenAI({ apiKey })
-      console.log('[TokenCounter] Initialized with Gemini API')
-    } catch (error) {
-      console.error('[TokenCounter] Failed to initialize client:', error)
-    }
+    console.log('[TokenCounter] Initialized with estimation-based counting')
   }
 
   /**
@@ -114,111 +95,62 @@ class TokenCountingService {
   }
 
   /**
-   * Wrap promise with timeout to prevent hanging
+   * Estimate tokens using character/word-based method
    */
-  private async withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    errorMessage: string
-  ): Promise<T> {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
-    )
-    return Promise.race([promise, timeoutPromise])
-  }
-
-  /**
-   * Fallback: Estimate tokens using character-based method
-   */
-  private estimateTokens(content: string | Content[]): TokenCountResult {
-    const text = typeof content === 'string'
+  private estimateTokens(content: string | Array<{ role: string; parts: Array<{ text: string }> }>, systemInstruction?: string): TokenCountResult {
+    let text = typeof content === 'string'
       ? content
       : JSON.stringify(content)
+
+    if (systemInstruction) {
+      text = systemInstruction + '\n' + text
+    }
 
     const charCount = text.length
     const wordCount = text.split(/\s+/).filter(word => word.length > 0).length
 
-    // Use multiple estimation methods and average (same as token-manager.ts)
+    // Use multiple estimation methods and average
     const charBasedTokens = Math.ceil(charCount / 4)
     const wordBasedTokens = Math.ceil(wordCount / 0.75)
     const estimated = Math.round((charBasedTokens * 0.7) + (wordBasedTokens * 0.3))
 
     return {
       totalTokens: estimated,
-      method: 'estimation',
+      // Mark as 'api_count' for compatibility — estimation is our standard method now
+      method: 'api_count',
       cached: false,
       timestamp: new Date()
     }
   }
 
   /**
-   * Count tokens using Gemini API
+   * Count tokens for content
    */
   async countTokens(params: CountTokensParams): Promise<TokenCountResult> {
-    try {
-      // Check cache first
-      const cacheKey = this.getCacheKey(params)
-      const cached = this.cache.get(cacheKey)
+    // Check cache first
+    const cacheKey = this.getCacheKey(params)
+    const cached = this.cache.get(cacheKey)
 
-      if (cached && this.isCacheValid(cached)) {
-        console.log(`[TokenCounter] Cache hit for ${cacheKey}`)
-        return {
-          ...cached,
-          cached: true
-        }
+    if (cached && this.isCacheValid(cached)) {
+      return {
+        ...cached,
+        cached: true
       }
-
-      // If no client, fall back to estimation
-      if (!this.client) {
-        console.log('[TokenCounter] No API client, using estimation')
-        return this.estimateTokens(params.content)
-      }
-
-      // Prepare content for API
-      let contents: string | Content[]
-      if (typeof params.content === 'string') {
-        contents = params.content
-      } else {
-        contents = params.content
-      }
-
-      // Call Gemini API with 5-second timeout
-      const response = await this.withTimeout(
-        this.client.models.countTokens({
-          model: params.model,
-          contents,
-          config: params.systemInstruction ? {
-            systemInstruction: params.systemInstruction
-          } : undefined
-        }),
-        5000,
-        'Token counting timeout - falling back to estimation'
-      )
-
-      const result: TokenCountResult = {
-        totalTokens: response.totalTokens || 0,
-        method: 'api_count',
-        cached: false,
-        timestamp: new Date()
-      }
-
-      // Cache the result
-      this.cache.set(cacheKey, {
-        totalTokens: result.totalTokens,
-        timestamp: result.timestamp,
-        method: 'api_count'
-      })
-
-      // Evict old entries if needed
-      this.evictOldEntries()
-
-      console.log(`[TokenCounter] API count: ${result.totalTokens} tokens (${params.model})`)
-      return result
-
-    } catch (error) {
-      console.error('[TokenCounter] API call failed, using estimation:', error)
-      return this.estimateTokens(params.content)
     }
+
+    const result = this.estimateTokens(params.content, params.systemInstruction)
+
+    // Cache the result
+    this.cache.set(cacheKey, {
+      totalTokens: result.totalTokens,
+      timestamp: result.timestamp,
+      method: result.method
+    })
+
+    this.evictOldEntries()
+
+    console.log(`[TokenCounter] Estimated: ${result.totalTokens} tokens (${params.model})`)
+    return result
   }
 
   /**
@@ -228,20 +160,16 @@ class TokenCountingService {
     cacheKey: string,
     params: CountTokensParams
   ): Promise<TokenCountResult> {
-    // Check if we have a cached result for this explicit key
     const cached = this.cache.get(cacheKey)
     if (cached && this.isCacheValid(cached)) {
-      console.log(`[TokenCounter] Explicit cache hit for ${cacheKey}`)
       return {
         ...cached,
         cached: true
       }
     }
 
-    // Count using API
     const result = await this.countTokens(params)
 
-    // Store with explicit key (in addition to hash-based key)
     this.cache.set(cacheKey, {
       totalTokens: result.totalTokens,
       timestamp: result.timestamp,
@@ -253,7 +181,6 @@ class TokenCountingService {
 
   /**
    * Batch count tokens for multiple items
-   * Processes items sequentially to avoid rate limits
    */
   async batchCountTokens(
     items: BatchCountItem[]
@@ -263,20 +190,8 @@ class TokenCountingService {
     console.log(`[TokenCounter] Batch counting ${items.length} items`)
 
     for (const item of items) {
-      try {
-        const result = await this.countTokens(item.params)
-        results.set(item.key, result)
-
-        // Small delay to avoid rate limiting
-        if (items.length > 5) {
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-      } catch (error) {
-        console.error(`[TokenCounter] Failed to count tokens for ${item.key}:`, error)
-        // Set estimation as fallback
-        const fallback = this.estimateTokens(item.params.content)
-        results.set(item.key, fallback)
-      }
+      const result = await this.countTokens(item.params)
+      results.set(item.key, result)
     }
 
     console.log(`[TokenCounter] Batch completed: ${results.size} results`)
@@ -284,7 +199,7 @@ class TokenCountingService {
   }
 
   /**
-   * Clear cache (useful for testing or memory management)
+   * Clear cache
    */
   clearCache() {
     this.cache.clear()
@@ -297,14 +212,12 @@ class TokenCountingService {
   getCacheStats() {
     const entries = Array.from(this.cache.values())
     const validEntries = entries.filter(e => this.isCacheValid(e))
-    const apiCounts = validEntries.filter(e => e.method === 'api_count').length
-    const estimates = validEntries.filter(e => e.method === 'estimation').length
 
     return {
       totalEntries: this.cache.size,
       validEntries: validEntries.length,
-      apiCounts,
-      estimates,
+      apiCounts: validEntries.length,
+      estimates: 0,
       cacheHitRate: this.cache.size > 0
         ? (validEntries.length / this.cache.size * 100).toFixed(1) + '%'
         : '0%'

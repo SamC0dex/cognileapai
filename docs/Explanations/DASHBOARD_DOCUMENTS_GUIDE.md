@@ -2,7 +2,7 @@
 
 ## What This System Does
 
-Think of CogniLeap like a smart study assistant. You upload PDF files, and the system helps you study them through chat, flashcards, and other tools. The **Dashboard** is your home base, the **Sidebar** is your navigation menu, and the **Documents Panel** is where you manage all your uploaded files.
+Think of CogniLeap like a smart study assistant. You upload PDF files, and the system helps you study them through chat, flashcards, and other tools. The **Dashboard** is your home base, the **Sidebar** is your navigation menu, and the **Files Panel** is where you manage all your uploaded files.
 
 ---
 
@@ -125,7 +125,7 @@ localStorage.setItem('sidebar-collapsed', isCollapsed)
 
 ---
 
-### 3️⃣ Documents Panel (File Manager)
+### 3️⃣ Files Panel (File Manager)
 
 **What it does:**
 - Upload PDFs (click or drag & drop)
@@ -138,7 +138,7 @@ localStorage.setItem('sidebar-collapsed', isCollapsed)
 - Connects to the **Documents Context** (shared state) so all parts of the app know which documents are selected
 - Updates in real-time as files are uploaded or processed
 
-**Location:** `src/components/documents-panel.tsx`
+**Location:** `src/components/files-panel.tsx`
 
 ---
 

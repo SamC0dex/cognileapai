@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenAI } from '@google/genai'
-import { GeminiModelSelector, validateGeminiConfig } from '@/lib/ai-config'
+import { validateGeminiConfig } from '@/lib/ai-config'
 import { createClient } from '@supabase/supabase-js'
+import { createClient as createAuthClient } from '@/lib/supabase/server'
+import { resolveAIConfig } from '@/lib/ai-router'
+import { generateCompletion } from '@/lib/ai-providers'
 
-// Use Edge Runtime for fastest response
-export const runtime = 'edge'
 export const maxDuration = 30
 
 // Initialize Supabase client
@@ -48,19 +48,11 @@ interface DocumentContext {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now()
-  
+
   try {
-    // Validate Gemini configuration
-    const validation = validateGeminiConfig()
-    if (!validation.isValid) {
-      return new NextResponse(
-        JSON.stringify({ error: validation.error }),
-        { 
-          status: 500, 
-          headers: { 'Content-Type': 'application/json' } 
-        }
-      )
-    }
+    // Authenticate user
+    const authSupabase = await createAuthClient()
+    const { data: { user } } = await authSupabase.auth.getUser()
 
     // Parse request body
     const {
@@ -112,34 +104,57 @@ export async function POST(req: NextRequest) {
     const systemPrompt = buildSystemPrompt(documentContext)
     const contextualMessage = buildContextualMessage(message, documentContext)
 
-    // Initialize Google GenAI client
-    const client = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY! })
+    let aiResponseText: string
+    let modelUsedLabel = 'FLASH_LITE'
 
-    // Use Flash-Lite model for chat responses
-    const modelName = GeminiModelSelector.getModelName('FLASH_LITE')
-    const modelConfig = GeminiModelSelector.getModelConfig('FLASH_LITE')
+    // Try user's configured provider first, fall back to server Gemini
+    const aiConfig = user ? await resolveAIConfig(user.id).catch(() => null) : null
 
-    console.log(`[AI] Using ${modelConfig.displayName} for document chat (${Date.now() - startTime}ms to start streaming)`)
-
-    // Prepare conversation history for Google GenAI SDK
-    const contents = [
-      {
-        role: 'user' as const,
-        parts: [{ text: systemPrompt + '\n\n' + contextualMessage }]
+    if (aiConfig?.userConfig) {
+      console.log(`[AI] Using ${aiConfig.provider}/${aiConfig.model} for document chat`)
+      aiResponseText = await generateCompletion(aiConfig.userConfig, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: contextualMessage },
+        ],
+        maxTokens: 2048,
+        temperature: 0.5,
+      })
+      modelUsedLabel = `${aiConfig.provider}/${aiConfig.model}`
+    } else {
+      // Server fallback — use resolveAIConfig to get Kie config
+      const validation = validateGeminiConfig()
+      if (!validation.isValid) {
+        return new NextResponse(
+          JSON.stringify({ error: 'No AI provider configured. Please add an API key in Settings.' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        )
       }
-    ]
 
-    // Generate response using Google GenAI SDK
-    const response = await client.models.generateContent({
-      model: modelName,
-      contents,
-      config: {
-        temperature: 0.7,
-        maxOutputTokens: 2048,
+      const serverKey = process.env.KIE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+      if (!serverKey) {
+        return new NextResponse(
+          JSON.stringify({ error: 'No AI API key configured.' }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        )
       }
-    })
 
-    const aiResponseText = response.text || 'No response generated'
+      const serverModel = 'gemini-3-flash'
+      console.log(`[AI] Using server Kie.ai/${serverModel} for document chat`)
+
+      aiResponseText = await generateCompletion(
+        { provider: 'kie', model: serverModel, apiKey: serverKey },
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: contextualMessage },
+          ],
+          maxTokens: 2048,
+          temperature: 0.5,
+        }
+      )
+      modelUsedLabel = `kie/${serverModel}`
+    }
 
     // Save messages to database
     try {
@@ -148,8 +163,8 @@ export async function POST(req: NextRequest) {
         documentId,
         userMessage: message,
         aiResponse: aiResponseText,
-        modelUsed: 'FLASH_LITE',
-        tokenUsage: response.usageMetadata?.totalTokenCount || 0,
+        modelUsed: modelUsedLabel,
+        tokenUsage: Math.ceil(aiResponseText.length / 4),
         responseTime: Date.now() - startTime
       })
     } catch (error) {
@@ -159,8 +174,8 @@ export async function POST(req: NextRequest) {
     // Return response with proper headers
     return NextResponse.json({
       content: aiResponseText,
-      model: 'FLASH_LITE',
-      usage: response.usageMetadata
+      model: modelUsedLabel,
+      usage: { totalTokenCount: Math.ceil(aiResponseText.length / 4) }
     }, {
       headers: {
         'Content-Type': 'application/json',

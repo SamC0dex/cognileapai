@@ -352,9 +352,9 @@ export function CourseCreationChat() {
 
             <button
               onClick={() => {
-                // Open documents panel
+                // Open files panel
                 if (typeof window !== 'undefined') {
-                  window.dispatchEvent(new CustomEvent('expand-documents-panel'))
+                  window.dispatchEvent(new CustomEvent('expand-files-panel'))
                 }
               }}
               className="flex flex-col items-center gap-2 p-4 rounded-xl hover:bg-muted/50 transition-all"

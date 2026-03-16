@@ -6,29 +6,17 @@ const bundleAnalyzer = withBundleAnalyzer({
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: false, // Temporarily disabled to avoid hydration issues with browser extensions
+  reactStrictMode: false,
+  devIndicators: false,
   outputFileTracingRoot: process.cwd(),
-  eslint: {
-    // Warning: Temporarily ignoring ESLint errors during builds
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    // Warning: Temporarily ignoring TypeScript errors during builds
-    ignoreBuildErrors: true,
-  },
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   webpack: (config) => {
-    // Fix case sensitivity issues on Windows
-    config.resolve.symlinks = false
-
     if (config.cache && typeof config.cache === 'object') {
-      config.cache = {
-        type: 'memory',
-        maxGenerations: 1,
-      }
+      config.cache = { type: 'memory', maxGenerations: 1 }
     }
-
     return config
   },
-};
+}
 
-export default bundleAnalyzer(nextConfig);
+export default bundleAnalyzer(nextConfig)

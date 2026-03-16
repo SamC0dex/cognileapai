@@ -7,8 +7,9 @@ import { ChatEmptyState } from './chat-empty-state'
 import { ChatScrollButton } from './chat-scroll-button'
 import { ContextWarning } from './context-warning'
 import { useChat } from '@/lib/use-chat'
-import { getSuggestedQuestions } from '@/lib/chat-store'
-import type { GeminiModelKey } from '@/lib/ai-config'
+import { getSuggestedQuestions, useChatStore } from '@/lib/chat-store'
+import type { ChatModelOption, ReasoningEffort } from '@/lib/use-user-preferences'
+import type { ProviderInfo } from '@/lib/model-registry'
 import type { Citation } from './types'
 import { createClient } from '@/lib/supabase/client'
 import { useDocuments } from '@/contexts/documents-context'
@@ -88,14 +89,22 @@ const supabase = createClient()
 const ChatContainerContent: React.FC<{
   documentId?: string
   conversationId?: string
-  selectedModel?: GeminiModelKey
-  onModelChange?: (model: GeminiModelKey) => void
+  selectedModelId?: string
+  onModelIdChange?: (modelId: string) => void
+  availableModels?: ChatModelOption[]
+  providerInfo?: ProviderInfo | null
+  reasoningEffort?: ReasoningEffort
+  onCycleReasoningEffort?: () => void
   onTokenUsageChange?: (payload: { tokens: ConversationTokens | null; isCalculating: boolean }) => void
 }> = React.memo(({
   documentId,
   conversationId,
-  selectedModel = 'FLASH',
-  onModelChange,
+  selectedModelId = 'gemini-2.5-flash',
+  onModelIdChange,
+  availableModels = [],
+  providerInfo = null,
+  reasoningEffort = 'low',
+  onCycleReasoningEffort,
   onTokenUsageChange
 }) => {
   const {
@@ -138,6 +147,12 @@ const ChatContainerContent: React.FC<{
     resetState,
     clearErrorStates
   } = useChat(effectiveDocumentId, conversationId, selectedDocuments)
+
+  // Sync reasoning effort into chat store so it's included in API payloads
+  const storeSetReasoningEffort = useChatStore().setReasoningEffort
+  useEffect(() => {
+    storeSetReasoningEffort(reasoningEffort)
+  }, [reasoningEffort, storeSetReasoningEffort])
 
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [scrollTrigger, setScrollTrigger] = useState(0)
@@ -389,13 +404,13 @@ const ChatContainerContent: React.FC<{
     if (!content.trim()) return
 
     try {
-      await sendMessage(content.trim(), selectedModel)
+      await sendMessage(content.trim(), selectedModelId)
       setError(null)
     } catch (error) {
       console.error('Failed to send message:', error)
       setError(error instanceof Error ? error.message : 'Failed to send message')
     }
-  }, [sendMessage, selectedModel, setError])
+  }, [sendMessage, selectedModelId, setError])
 
   const retryPendingMessage = useCallback(() => {
     if (!pendingMessage) return
@@ -460,7 +475,7 @@ const ChatContainerContent: React.FC<{
   }, [])
 
   // Handle regenerate with model override
-  const handleRegenerate = useCallback((modelOverride?: GeminiModelKey) => {
+  const handleRegenerate = useCallback((modelOverride?: string) => {
     regenerateLastMessage(modelOverride)
   }, [regenerateLastMessage])
 
@@ -572,8 +587,12 @@ const ChatContainerContent: React.FC<{
           }
           maxLength={4000}
           autoFocus={false}
-          selectedModel={selectedModel}
-          onModelChange={onModelChange}
+          selectedModelId={selectedModelId}
+          onModelIdChange={onModelIdChange}
+          availableModels={availableModels}
+          providerInfo={providerInfo}
+          reasoningEffort={reasoningEffort}
+          onCycleReasoningEffort={onCycleReasoningEffort}
           selectedDocuments={selectedDocuments}
           urlSelectedDocument={urlSelectedDocument}
           onRemoveDocument={handleRemoveDocument}

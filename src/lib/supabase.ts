@@ -57,6 +57,7 @@ export type Database = {
           document_content: string | null
           actual_tokens: number | null
           token_count_method: string
+          file_type: string
           created_at: string
           updated_at: string
           user_id: string | null
@@ -74,6 +75,7 @@ export type Database = {
           document_content?: string | null
           actual_tokens?: number | null
           token_count_method?: string
+          file_type?: string
           created_at?: string
           updated_at?: string
           user_id?: string | null
@@ -91,6 +93,7 @@ export type Database = {
           document_content?: string | null
           actual_tokens?: number | null
           token_count_method?: string
+          file_type?: string
           created_at?: string
           updated_at?: string
           user_id?: string | null

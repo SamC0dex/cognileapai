@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { GeminiModelKey } from './ai-config'
+// Model selection now uses string model IDs from user preferences (e.g., 'gemini-2.5-flash', 'anthropic/claude-opus-4.6')
 import { TokenManager, type ConversationTokens } from './token-manager'
 import { translateError, getNextAutoRetryDelay } from './errors/translator'
 import { logError } from './errors/logger'
@@ -55,7 +55,7 @@ interface StoreShape {
   friendlyError: UserFacingError | null
   documentContext: DocumentContext | null
   currentConversation: string | null
-  selectedModel: GeminiModelKey
+  selectedModel: string
   autoRetryState: AutoRetryState | null
   rateLimitUntil: number | null
   pendingMessage: string | null
@@ -75,14 +75,15 @@ interface StoreShape {
 
   // actions
   loadConversation: (conversationId: string, documentId?: string) => Promise<void>
-  sendMessage: (content: string, documentId?: string | null, model?: GeminiModelKey, selectedDocuments?: Array<{id: string, title: string}>, skipUserMessage?: boolean, isAutoRetry?: boolean) => Promise<void>
+  sendMessage: (content: string, documentId?: string | null, model?: string, selectedDocuments?: Array<{id: string, title: string}>, skipUserMessage?: boolean, isAutoRetry?: boolean) => Promise<void>
 
-  regenerateLastMessage: (modelOverride?: GeminiModelKey, selectedDocuments?: Array<{id: string, title: string}>) => Promise<void>
+  regenerateLastMessage: (modelOverride?: string, selectedDocuments?: Array<{id: string, title: string}>) => Promise<void>
   setDocumentContext: (ctx: DocumentContext | null) => void
   setStreamingMessage: (val: string) => void
   setError: (err: string | null) => void
   setFriendlyError: (err: UserFacingError | null) => void
-  setSelectedModel: (model: GeminiModelKey) => void
+  setSelectedModel: (model: string) => void
+  setReasoningEffort: (effort: 'low' | 'medium' | 'high') => void
   createNewConversation: (documentId?: string) => Promise<string>
   resetState: () => void
   clearErrorStates: () => void
@@ -101,7 +102,7 @@ interface AutoRetryState {
   maxAttempts: number
   nextRetryAt: number
   message: string
-  model: GeminiModelKey
+  model: string
   documentId?: string
   selectedDocuments?: Array<{ id: string; title: string }>
   skipUserMessage: boolean
@@ -154,7 +155,8 @@ export function useChatStore(): StoreShape {
   const [friendlyError, setFriendlyErrorState] = useState<UserFacingError | null>(null)
   const [documentContext, setDocumentContext] = useState<DocumentContext | null>(null)
   const [currentConversation, setCurrentConversation] = useState<string | null>(null)
-  const [selectedModel, setSelectedModel] = useState<GeminiModelKey>('FLASH')
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash')
+  const [reasoningEffort, setReasoningEffort] = useState<'low' | 'medium' | 'high'>('low')
   const [autoRetryState, setAutoRetryState] = useState<AutoRetryState | null>(null)
   const [rateLimitUntil, setRateLimitUntil] = useState<number | null>(null)
   const [pendingMessage, setPendingMessage] = useState<string | null>(null)
@@ -324,7 +326,7 @@ export function useChatStore(): StoreShape {
   const sendMessage = useCallback(async (
     content: string,
     documentId?: string | null,
-    model?: GeminiModelKey,
+    model?: string,
     selectedDocuments?: Array<{ id: string, title: string }>,
     skipUserMessage = false,
     isAutoRetry = false
@@ -352,6 +354,7 @@ export function useChatStore(): StoreShape {
     let finalUserTokens: number | undefined // Accurate user message token count
     let finalAssistantTokens: number | undefined // Accurate assistant message token count
     let finalMessageTokenMethod: 'api_count' | 'estimation' | undefined // Token counting method for messages
+    let serverMetadata: Record<string, unknown> | undefined // Full metadata from server 8: response
 
     // Add user message unless this is a regeneration
     if (!skipUserMessage) {
@@ -473,7 +476,8 @@ export function useChatStore(): StoreShape {
         documentId: documentId || documentContext?.id,
         selectedDocuments: selectedDocuments,
         conversationId: convId,
-        preferredModel: modelToUse
+        preferredModel: modelToUse,
+        reasoningEffort: reasoningEffort
       }
 
       console.log(`[Chat] Sending message with model ${modelToUse}...`)
@@ -598,6 +602,7 @@ export function useChatStore(): StoreShape {
               } else if (line.startsWith('8:')) {
                 try {
                   const metadata = JSON.parse(line.slice(2))
+                  serverMetadata = metadata as Record<string, unknown>
                   console.log('[Chat] Received metadata:', metadata)
                   if (metadata?.usage?.totalTokens) {
                     finalTokenUsage = metadata.usage.totalTokens
@@ -668,17 +673,17 @@ export function useChatStore(): StoreShape {
         throw new Error('AI response was empty')
       }
 
-      // Get model display name from ai-config
-      const { GeminiModelSelector } = await import('./ai-config')
-      const modelConfig = GeminiModelSelector.getModelConfig(modelToUse)
+      // Get model display name — use metadata from server response if available,
+      // otherwise derive from the model ID string (works for any provider)
+      const modelDisplayName = serverMetadata?.model || modelToUse
 
       // Final update with metadata (will be handled by the interval completion)
       const finalUpdate = () => {
         // Use accurate token counts if available, fallback to estimation
-        const assistantTokenCount = finalAssistantTokens 
+        const assistantTokenCount = finalAssistantTokens
           ? { estimated: finalAssistantTokens, confidence: 'high' as const }
           : TokenManager.estimate(serverBuffer)
-        
+
         const userTokenCount = finalUserTokens
           ? { estimated: finalUserTokens, confidence: 'high' as const }
           : (user?.tokenCount || TokenManager.estimate(content))
@@ -692,7 +697,7 @@ export function useChatStore(): StoreShape {
               isStreaming: false,
               tokenCount: assistantTokenCount,
               metadata: {
-                model: modelConfig.displayName,
+                model: modelDisplayName,
                 modelKey: modelToUse,
                 duration,
                 tokens: finalAssistantTokens || assistantTokenCount.estimated,
@@ -769,9 +774,8 @@ export function useChatStore(): StoreShape {
         console.warn('[Chat] Empty response received, using fallback')
       }
 
-      // Get model display name
-      const { GeminiModelSelector } = await import('./ai-config')
-      const modelConfig = GeminiModelSelector.getModelConfig(modelToUse)
+      // Get model display name from server metadata or model ID
+      const modelDisplayName2 = serverMetadata?.model || modelToUse
 
       // Final update with metadata
       const finalUpdate = () => {
@@ -787,7 +791,7 @@ export function useChatStore(): StoreShape {
                   confidence: assistantTokenCount.confidence
                 },
                 metadata: {
-                  model: modelConfig.displayName,
+                  model: modelDisplayName2,
                   modelKey: modelToUse,
                   duration,
                   tokens: finalTokenUsage || assistantTokenCount.estimated
@@ -972,7 +976,7 @@ export function useChatStore(): StoreShape {
     }
   }
 
-  const regenerateLastMessage = useCallback(async (modelOverride?: GeminiModelKey, selectedDocuments?: Array<{id: string, title: string}>) => {
+  const regenerateLastMessage = useCallback(async (modelOverride?: string, selectedDocuments?: Array<{id: string, title: string}>) => {
     // Find last assistant and user message indices
     let lastAssistantIndex = -1
     let lastUserIndex = -1
@@ -1355,6 +1359,7 @@ export function useChatStore(): StoreShape {
     setError,
     setFriendlyError: setFriendlyErrorState,
     setSelectedModel,
+    setReasoningEffort,
     createNewConversation,
     resetState,
     clearErrorStates,

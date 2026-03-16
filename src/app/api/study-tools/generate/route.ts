@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenAI } from '@google/genai'
+import OpenAI from 'openai'
 import { createClient as createAuthClient } from '@/lib/supabase/server'
 import { createClient } from '@supabase/supabase-js'
 import { getStudyToolPrompt, generateStudyToolTitle, type StudyToolPromptType } from '@/lib/study-tools-prompts'
 import { classifyError, addRetryAttempt } from '@/lib/retry-manager'
+import { resolveAIConfig } from '@/lib/ai-router'
+import { generateCompletion, type UserAIConfig } from '@/lib/ai-providers'
 
 // Service role client for background operations only (bypasses RLS)
 const serviceSupabase = createClient(
@@ -77,10 +79,10 @@ const TOOL_TOKEN_ALLOCATIONS: Record<string, number> = {
 
 const MODEL_HIERARCHY: ModelConfig[] = [
   {
-    name: 'gemini-2.5-pro',
+    name: 'gemini-3-flash',
     maxInputTokens: 1000000,  // 1M context window
     baseOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-    temperature: 0.7,
+    temperature: 0.5,
     topK: 40,
     maxRetries: 3
   },
@@ -88,17 +90,17 @@ const MODEL_HIERARCHY: ModelConfig[] = [
     name: 'gemini-2.5-flash',
     maxInputTokens: 1000000,  // 1M context window
     baseOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-    temperature: 0.75,
+    temperature: 0.5,
     topK: 35,
     maxRetries: 3
   },
   {
-    name: 'gemini-2.5-flash-lite',
+    name: 'gemini-2.5-pro',
     maxInputTokens: 1000000,  // 1M context window
     baseOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
-    temperature: 0.8,
+    temperature: 0.5,
     topK: 30,
-    maxRetries: 2 // Last resort gets fewer retries
+    maxRetries: 2
   }
 ]
 
@@ -183,7 +185,10 @@ async function generateWithFallback(
   userPrompt: string,
   type: string
 ): Promise<FallbackResult> {
-  const client = new GoogleGenAI({ apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY! })
+  const apiKey = process.env.KIE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY
+  if (!apiKey) {
+    throw new Error('No AI API key configured. Set KIE_API_KEY in your .env.local.')
+  }
 
   // Estimate token count (rough approximation: 1 token ≈ 4 characters)
   const estimatedTokens = Math.ceil((systemPrompt.length + userPrompt.length) / 4)
@@ -196,9 +201,9 @@ async function generateWithFallback(
     const modelConfig = MODEL_HIERARCHY[modelIndex]
     const modelStartTime = Date.now()
 
-    console.log(`[Fallback] Attempting generation with ${modelConfig.name} (tokens: ${estimatedTokens}/${modelConfig.maxInputTokens})`)
+    console.log(`[Fallback] Attempting generation with ${modelConfig.name} via Kie.ai (tokens: ${estimatedTokens}/${modelConfig.maxInputTokens})`)
 
-    // Check if content fits within model limits - if too large, skip to next model
+    // Check if content fits within model limits
     if (estimatedTokens > modelConfig.maxInputTokens) {
       console.log(`[Fallback] Content too large for ${modelConfig.name} (${estimatedTokens} > ${modelConfig.maxInputTokens}), trying next model...`)
       continue
@@ -213,21 +218,24 @@ async function generateWithFallback(
         // Get optimal output tokens for this tool type and model
         const optimalOutputTokens = getOptimalOutputTokens(type, modelConfig.name)
 
-        // Standard generation attempt
-        const response = await client.models.generateContent({
-          model: modelConfig.name,
-          contents: [{
-            role: 'user',
-            parts: [{ text: systemPrompt + '\n\n' + userPrompt }]
-          }],
-          config: {
-            temperature: modelConfig.temperature,
-            maxOutputTokens: optimalOutputTokens,
-            topK: modelConfig.topK,
-          }
+        // Create Kie client for this model
+        const client = new OpenAI({
+          apiKey,
+          baseURL: `https://api.kie.ai/${modelConfig.name}/v1`,
         })
 
-        const resultText = response.text || ''
+        // Generate via OpenAI-compatible API
+        const response = await client.chat.completions.create({
+          model: modelConfig.name,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: modelConfig.temperature,
+          max_tokens: optimalOutputTokens,
+        })
+
+        const resultText = response.choices[0]?.message?.content || ''
 
         // Check for truncation or insufficient content
         if (resultText.length < 50) {
@@ -368,6 +376,7 @@ export async function POST(req: NextRequest) {
     // Debug logging
     console.log('[StudyTools] API Request received:', { type, documentId, conversationId })
     console.log('[StudyTools] Environment check:', {
+      hasKieKey: !!process.env.KIE_API_KEY,
       hasGeminiKey: !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
       hasSupabaseUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       hasSupabaseServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -388,10 +397,22 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Verify Gemini API key
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    // Resolve AI config (user preference or server fallback)
+    let userAIConfig: UserAIConfig | null = null
+    try {
+      const aiConfig = await resolveAIConfig(user.id)
+      if (aiConfig.userConfig) {
+        userAIConfig = aiConfig.userConfig
+        console.log(`[StudyTools] Using user's ${aiConfig.provider}/${aiConfig.model}`)
+      }
+    } catch {
+      // No user config
+    }
+
+    // If no user config, verify server key (Kie or Google)
+    if (!userAIConfig && !process.env.KIE_API_KEY && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
       return NextResponse.json(
-        { error: 'Gemini API key not configured' },
+        { error: 'No AI provider configured. Please add an API key in Settings.' },
         { status: 500 }
       )
     }
@@ -522,13 +543,31 @@ export async function POST(req: NextRequest) {
 
     console.log(`[StudyTools] Generating ${type} for "${documentTitle}" (${documentContent.length} chars)`)
 
-    // Generate study tool using multi-model fallback strategy
+    // Generate study tool
     const startTime = Date.now()
-    const { resultText, modelUsed, duration: generationDuration } = await generateWithFallback(
-      systemPrompt,
-      userPrompt,
-      type
-    )
+    let resultText: string
+    let modelUsed: string
+    let generationDuration: number
+
+    if (userAIConfig) {
+      // Use user's configured provider
+      resultText = await generateCompletion(userAIConfig, {
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        maxTokens: TOOL_TOKEN_ALLOCATIONS[type] || 16384,
+        temperature: 0.7,
+      })
+      modelUsed = `${userAIConfig.provider}/${userAIConfig.model}`
+      generationDuration = Date.now() - startTime
+    } else {
+      // Use server Gemini with fallback strategy
+      const fallbackResult = await generateWithFallback(systemPrompt, userPrompt, type)
+      resultText = fallbackResult.resultText
+      modelUsed = fallbackResult.modelUsed
+      generationDuration = fallbackResult.duration
+    }
 
     const duration = Date.now() - startTime
     console.log(`[StudyTools] Generated ${type} in ${duration}ms using ${modelUsed} (${resultText.length} chars)`)

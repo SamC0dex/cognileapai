@@ -4,6 +4,9 @@ import { createClient } from '@/lib/supabase/server'
 import { supabase as serviceSupabase } from '@/lib/supabase'
 import PDFParser from 'pdf2json'
 
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const officeParser = require('officeparser') as { parseOfficeAsync: (input: Buffer) => Promise<string> }
+
 // TypeScript interfaces for PDF parser data structures
 interface PDFTextRun {
   T: string // Encoded text content
@@ -38,6 +41,45 @@ interface DatabaseDocument {
   updated_at: string
 }
 
+const MIME_TO_EXT: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+  'application/vnd.ms-powerpoint': 'ppt',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.oasis.opendocument.text': 'odt',
+  'application/vnd.oasis.opendocument.presentation': 'odp',
+  'application/vnd.oasis.opendocument.spreadsheet': 'ods',
+  'application/rtf': 'rtf',
+  'text/rtf': 'rtf',
+  'text/plain': 'txt',
+  'text/csv': 'csv',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/tiff': 'tiff',
+  'image/heic': 'heic',
+  'image/heif': 'heic',
+}
+
+const IMAGE_MIMES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/heic', 'image/heif'])
+const OFFICE_MIMES = new Set([
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.presentation',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'application/rtf', 'text/rtf',
+])
+
 export async function POST(req: NextRequest) {
   try {
     console.log('Upload API called')
@@ -60,20 +102,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    if (file.type !== 'application/pdf') {
-      return NextResponse.json({ 
-        error: 'Invalid file type. Only PDF files are supported.',
-        details: 'Please upload a PDF document.' 
+    const fileType = MIME_TO_EXT[file.type]
+    if (!fileType) {
+      return NextResponse.json({
+        error: 'Unsupported file type.',
+        details: `"${file.type}" is not supported. Accepted: PDF, Word, PowerPoint, Excel, LibreOffice, RTF, TXT, CSV, JPG, PNG, WEBP, GIF, BMP, TIFF, HEIC.`
       }, { status: 400 })
     }
 
     // File size validation (only validate binary file size)
     const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB hard limit
-    
+
     if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json({ 
+      return NextResponse.json({
         error: 'File too large',
-        message: `PDF file exceeds the maximum size limit of 100MB. Your file is ${Math.round(file.size / (1024 * 1024))}MB.`,
+        message: `File exceeds the maximum size limit of 100MB. Your file is ${Math.round(file.size / (1024 * 1024))}MB.`,
         details: 'Please try a smaller document or split it into multiple parts.',
         size: file.size,
         limit: MAX_FILE_SIZE
@@ -114,7 +157,7 @@ export async function POST(req: NextRequest) {
           })
           .eq('id', document.id)
 
-        queueBackgroundProcessing(document.id, buffer)
+        queueBackgroundProcessing(document.id, buffer, file.type)
       } else {
         await supabase
           .from('documents')
@@ -186,33 +229,38 @@ export async function POST(req: NextRequest) {
 
     let pageCount = 0
     try {
-      // Suppress PDF.js warnings temporarily
-      const originalWarn = console.warn
-      console.warn = () => {} // Suppress all warnings during PDF parsing
+      if (file.type === 'application/pdf') {
+        // Suppress PDF.js warnings temporarily
+        const originalWarn = console.warn
+        console.warn = () => {} // Suppress all warnings during PDF parsing
 
-      const parsePdf = () => {
-        return new Promise((resolve, reject) => {
-          const pdfParser = new PDFParser()
+        const parsePdf = () => {
+          return new Promise((resolve, reject) => {
+            const pdfParser = new PDFParser()
 
-          pdfParser.on('pdfParser_dataError', (errMsg: Error | { parserError: Error }) => {
-            const errorMessage = errMsg instanceof Error ? errMsg.message : errMsg.parserError.message
-            reject(new Error(errorMessage))
+            pdfParser.on('pdfParser_dataError', (errMsg: Error | { parserError: Error }) => {
+              const errorMessage = errMsg instanceof Error ? errMsg.message : errMsg.parserError.message
+              reject(new Error(errorMessage))
+            })
+
+            pdfParser.on('pdfParser_dataReady', (pdfData: PDFParserData) => {
+              const pages = pdfData.Pages ? pdfData.Pages.length : 0
+              resolve(pages)
+            })
+
+            pdfParser.parseBuffer(buffer)
           })
+        }
 
-          pdfParser.on('pdfParser_dataReady', (pdfData: PDFParserData) => {
-            const pages = pdfData.Pages ? pdfData.Pages.length : 0
-            resolve(pages)
-          })
-
-          pdfParser.parseBuffer(buffer)
-        })
+        pageCount = await parsePdf() as number
+        console.warn = originalWarn // Restore console.warn
+        console.log('PDF parsed successfully, pages:', pageCount)
+      } else {
+        pageCount = 1 // For all non-PDF types, default to 1
       }
-
-      pageCount = await parsePdf() as number
-      console.warn = originalWarn // Restore console.warn
-      console.log('PDF parsed successfully, pages:', pageCount)
     } catch (parseError) {
-      console.error('PDF parsing error:', parseError)
+      console.error('Page count error:', parseError)
+      pageCount = 1
     }
 
     const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
@@ -221,7 +269,7 @@ export async function POST(req: NextRequest) {
     const { data: uploadData, error: uploadError } = await serviceSupabase.storage
       .from('documents')
       .upload(fileName, buffer, {
-        contentType: 'application/pdf'
+        contentType: file.type
       })
 
     if (uploadError) {
@@ -235,13 +283,14 @@ export async function POST(req: NextRequest) {
     const { data: document, error: dbError } = await supabase
       .from('documents')
       .insert({
-        title: file.name.replace(/\.pdf$/i, ''),
+        title: file.name.replace(/\.[^.]+$/, ''),
         page_count: pageCount,
         bytes: file.size,
         storage_path: uploadData.path,
         processing_status: 'processing',
         checksum,
-        user_id: user.id // Critical: Associate document with user
+        user_id: user.id, // Critical: Associate document with user
+        file_type: fileType,
       })
       .select()
       .single()
@@ -263,7 +312,7 @@ export async function POST(req: NextRequest) {
 
         if (conflictError && conflictError.code !== 'PGRST116') {
           console.error('Failed to retrieve conflicting document:', conflictError)
-          return NextResponse.json({ 
+          return NextResponse.json({
             error: 'Document already exists',
             message: 'This document has already been uploaded. Please check your Sources panel.',
             details: 'If you need to re-upload, please delete the existing document first.'
@@ -274,7 +323,7 @@ export async function POST(req: NextRequest) {
           // Checksum exists but not for this user (shouldn't happen due to unique constraint)
           // Return generic error without revealing other users' documents
           console.error('Checksum exists but no matching document found for user:', user.id)
-          return NextResponse.json({ 
+          return NextResponse.json({
             error: 'Upload failed',
             message: 'Unable to process this document. Please try again with a different file.',
             details: 'If the problem persists, please contact support.'
@@ -299,7 +348,7 @@ export async function POST(req: NextRequest) {
         page_end: pageCount > 0 ? pageCount : 1
       })
 
-    queueBackgroundProcessing(document.id, buffer)
+    queueBackgroundProcessing(document.id, buffer, file.type)
 
     return NextResponse.json({
       success: true,
@@ -318,11 +367,101 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Enhanced background processing function with PDF text extraction
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const originalWarn = console.warn
+    console.warn = () => {}
+
+    const pdfParser = new PDFParser()
+
+    pdfParser.on('pdfParser_dataError', (errMsg: Error | { parserError: Error }) => {
+      console.warn = originalWarn
+      const errorMessage = errMsg instanceof Error ? errMsg.message : errMsg.parserError.message
+      reject(new Error(errorMessage))
+    })
+
+    pdfParser.on('pdfParser_dataReady', (pdfData: PDFParserData) => {
+      console.warn = originalWarn
+      try {
+        let text = ''
+        if (pdfData.Pages) {
+          pdfData.Pages.forEach((page: PDFPage) => {
+            if (page.Texts) {
+              page.Texts.forEach((textItem: PDFTextItem) => {
+                if (textItem.R) {
+                  textItem.R.forEach((textRun: PDFTextRun) => {
+                    if (textRun.T) {
+                      text += decodeURIComponent(textRun.T) + ' '
+                    }
+                  })
+                }
+              })
+              text += '\n'
+            }
+          })
+        }
+        resolve(text.trim())
+      } catch (error) {
+        reject(error)
+      }
+    })
+
+    pdfParser.parseBuffer(buffer)
+  })
+}
+
+async function extractTextFromImage(buffer: Buffer, _mimeType?: string): Promise<string> {
+  const apiKey = process.env.GOOGLE_CLOUD_VISION_API_KEY
+  if (!apiKey) throw new Error('GOOGLE_CLOUD_VISION_API_KEY not set')
+
+  const base64 = buffer.toString('base64')
+
+  const res = await fetch(
+    `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requests: [{
+          image: { content: base64 },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
+        }]
+      })
+    }
+  )
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Google Cloud Vision API error: ${res.status} ${err}`)
+  }
+
+  const data = await res.json()
+  const annotation = data.responses?.[0]?.fullTextAnnotation
+  return annotation?.text?.trim() ?? ''
+}
+
+async function extractText(mimeType: string, buffer: Buffer): Promise<string> {
+  if (mimeType === 'application/pdf') {
+    return await extractPdfText(buffer)
+  }
+  if (OFFICE_MIMES.has(mimeType)) {
+    const text = await officeParser.parseOfficeAsync(buffer)
+    return typeof text === 'string' ? text.trim() : ''
+  }
+  if (mimeType === 'text/plain' || mimeType === 'text/csv') {
+    return buffer.toString('utf-8').trim()
+  }
+  if (IMAGE_MIMES.has(mimeType)) {
+    return await extractTextFromImage(buffer, mimeType)
+  }
+  return ''
+}
+
+// Enhanced background processing function with document text extraction
 // Uses service role client to bypass RLS since this runs in background
-async function startBackgroundProcessing(documentId: string, buffer: Buffer) {
+async function startBackgroundProcessing(documentId: string, buffer: Buffer, mimeType: string) {
   try {
-    console.log(`[Background] Starting PDF processing for document ${documentId}`)
+    console.log(`[Background] Starting document processing for document ${documentId}`)
 
     // Update status to processing (using service role client)
     await serviceSupabase
@@ -330,65 +469,21 @@ async function startBackgroundProcessing(documentId: string, buffer: Buffer) {
       .update({ processing_status: 'processing' })
       .eq('id', documentId)
 
-    // Extract text content from PDF using pdf2json
+    // Extract text content from document
     let extractedText = ''
     try {
-      // Suppress PDF.js warnings temporarily
-      const originalWarn = console.warn
-      console.warn = () => {} // Suppress all warnings during PDF parsing
+      extractedText = await extractText(mimeType, buffer)
+      console.log(`[Background] Extracted ${extractedText.length} characters from document`)
 
-      const extractText = () => {
-        return new Promise<string>((resolve, reject) => {
-          const pdfParser = new PDFParser()
-
-          pdfParser.on('pdfParser_dataError', (errMsg: Error | { parserError: Error }) => {
-            const errorMessage = errMsg instanceof Error ? errMsg.message : errMsg.parserError.message
-            reject(new Error(errorMessage))
-          })
-
-          pdfParser.on('pdfParser_dataReady', (pdfData: PDFParserData) => {
-            try {
-              let text = ''
-              if (pdfData.Pages) {
-                pdfData.Pages.forEach((page: PDFPage) => {
-                  if (page.Texts) {
-                    page.Texts.forEach((textItem: PDFTextItem) => {
-                      if (textItem.R) {
-                        textItem.R.forEach((textRun: PDFTextRun) => {
-                          if (textRun.T) {
-                            // Decode the text and add spaces
-                            text += decodeURIComponent(textRun.T) + ' '
-                          }
-                        })
-                      }
-                    })
-                    text += '\n' // Add line break after each page
-                  }
-                })
-              }
-              resolve(text.trim())
-            } catch (error) {
-              reject(error)
-            }
-          })
-
-          pdfParser.parseBuffer(buffer)
-        })
-      }
-
-      extractedText = await extractText()
-      console.warn = originalWarn // Restore console.warn
-      console.log(`[Background] Extracted ${extractedText.length} characters from PDF`)
-
-      // Count actual tokens using Gemini API
+      // Count tokens using estimation
       let actualTokens: number | null = null
       let tokenCountMethod: 'api_count' | 'estimation' = 'estimation'
-      
+
       try {
         const { countDocumentTokens } = await import('@/lib/token-counter')
         const result = await countDocumentTokens(
           documentId,
-          'gemini-2.0-flash-exp', // Use the model for counting
+          'gemini-3-flash', // Model reference for cache key
           extractedText
         )
         actualTokens = result.totalTokens
@@ -413,7 +508,7 @@ async function startBackgroundProcessing(documentId: string, buffer: Buffer) {
         })
         .eq('id', documentId)
 
-      console.log(`[Background] PDF text extraction completed for document ${documentId} (${actualTokens} tokens, ${tokenCountMethod})`)
+      console.log(`[Background] Document text extraction completed for document ${documentId} (${actualTokens} tokens, ${tokenCountMethod})`)
 
     } catch (textError) {
       console.error(`[Background] Text extraction failed, but marking as completed:`, textError)
@@ -442,9 +537,9 @@ async function startBackgroundProcessing(documentId: string, buffer: Buffer) {
   }
 }
 
-function queueBackgroundProcessing(documentId: string, buffer: Buffer) {
-  startBackgroundProcessing(documentId, buffer).catch(error => {
-    console.error(`Background PDF processing failed for document ${documentId}:`, error)
+function queueBackgroundProcessing(documentId: string, buffer: Buffer, mimeType: string) {
+  startBackgroundProcessing(documentId, buffer, mimeType).catch(error => {
+    console.error(`Background document processing failed for document ${documentId}:`, error)
 
     // Use service role client for background updates
     serviceSupabase

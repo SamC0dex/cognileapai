@@ -12,7 +12,7 @@ interface ChatMessagesProps {
   streamingMessage?: string | null
   onCitationClick: (citation: Citation) => void
   onScrollStateChange: (userScrolled: boolean, showScrollButton: boolean) => void
-  onRegenerate?: (modelOverride?: import('../../lib/ai-config').GeminiModelKey) => void
+  onRegenerate?: (modelOverride?: string) => void
   onCopy?: (text: string) => void
   forceScrollToBottom?: number
   conversationTokens?: import('../../lib/token-manager').ConversationTokens

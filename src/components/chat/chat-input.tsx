@@ -2,9 +2,10 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { GEMINI_MODELS, GeminiModelKey } from '@/lib/ai-config'
 import { useChatStore } from '@/lib/chat-store'
 import { GeminiLogo } from '@/components/icons/gemini-logo'
+import type { ChatModelOption, ReasoningEffort } from '@/lib/use-user-preferences'
+import type { ProviderInfo } from '@/lib/model-registry'
 import { toast } from 'sonner'
 import type { ChatInputProps } from './types'
 import type { DocumentRecord, DocumentUploadedDetail } from '@/types/documents'
@@ -15,8 +16,12 @@ const MAX_HEIGHT = 144 // Maximum height (4 lines * 36px)
 const LINE_HEIGHT = 24 // Approximate line height
 
 export const ChatInput: React.FC<ChatInputProps & {
-  selectedModel?: GeminiModelKey
-  onModelChange?: (model: GeminiModelKey) => void
+  selectedModelId?: string
+  onModelIdChange?: (modelId: string) => void
+  availableModels?: ChatModelOption[]
+  providerInfo?: ProviderInfo | null
+  reasoningEffort?: ReasoningEffort
+  onCycleReasoningEffort?: () => void
   disabledReason?: string
   rateLimitCountdown?: number | null
   initialValue?: string
@@ -26,8 +31,12 @@ export const ChatInput: React.FC<ChatInputProps & {
   placeholder = 'Type your message here...',
   maxLength = 4000,
   autoFocus = false,
-  selectedModel = 'FLASH',
-  onModelChange,
+  selectedModelId = 'gemini-2.5-flash',
+  onModelIdChange,
+  availableModels = [],
+  providerInfo = null,
+  reasoningEffort = 'low',
+  onCycleReasoningEffort,
   selectedDocuments = [],
   urlSelectedDocument = null,
   onRemoveDocument,
@@ -222,10 +231,14 @@ export const ChatInput: React.FC<ChatInputProps & {
   const showCharacterCount = inputValue.length > 500 || isOverLimit
   const canSend = inputValue.trim().length > 0 && !isSending && !disabled
 
-  const handleModelSelect = useCallback((model: GeminiModelKey) => {
-    onModelChange?.(model)
+  const handleModelSelect = useCallback((modelId: string) => {
+    onModelIdChange?.(modelId)
     setShowModelSelector(false)
-  }, [onModelChange])
+  }, [onModelIdChange])
+
+  // Find the currently selected model from the available models list
+  const currentModel = availableModels.find(m => m.id === selectedModelId) || availableModels[0]
+  const isGeminiProvider = !providerInfo || providerInfo.id === 'gemini'
 
   const toggleModelSelector = useCallback(() => {
     setShowModelSelector(!showModelSelector)
@@ -244,15 +257,15 @@ export const ChatInput: React.FC<ChatInputProps & {
   const handleFileUpload = useCallback(async () => {
     if (isUploading) return
 
-    // First expand the documents panel to show upload progress
+    // First expand the files panel to show upload progress
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('expand-documents-panel'))
+      window.dispatchEvent(new CustomEvent('expand-files-panel'))
     }
 
     // Create file input dynamically
     const input = document.createElement('input')
     input.type = 'file'
-    input.accept = '.pdf'
+    // No accept filter — server validates MIME type
     input.multiple = false
     input.onchange = async (e) => {
       const files = Array.from((e.target as HTMLInputElement).files || [])
@@ -262,7 +275,7 @@ export const ChatInput: React.FC<ChatInputProps & {
         
         // Generate temporary ID for optimistic update
         const tempId = `uploading-${Date.now()}-${Math.random()}`
-        const documentTitle = file.name.replace(/\.pdf$/i, '')
+        const documentTitle = file.name.replace(/\.[^.]+$/, '')
         
         // Mark upload intent for auto-select after refresh
         try {
@@ -464,13 +477,22 @@ export const ChatInput: React.FC<ChatInputProps & {
                     onClick={toggleModelSelector}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-primary/10 text-primary rounded-lg border border-primary/20 hover:bg-primary/15 transition-all duration-200 dark:bg-primary/20 dark:border-primary/40"
                   >
-                    <GeminiLogo size={16} />
-                    <span>{GEMINI_MODELS[selectedModel].displayName}</span>
+                    {isGeminiProvider ? (
+                      <GeminiLogo size={16} />
+                    ) : (
+                      <div
+                        className="w-4 h-4 rounded flex items-center justify-center text-white text-[8px] font-bold shrink-0"
+                        style={{ backgroundColor: providerInfo?.color || '#4285F4' }}
+                      >
+                        {providerInfo?.name?.charAt(0) || 'G'}
+                      </div>
+                    )}
+                    <span>{currentModel?.name || 'Select Model'}</span>
                     <svg className={`w-3 h-3 transition-transform duration-200 ${showModelSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </motion.button>
-                  
+
                   {/* Model Dropdown */}
                   <AnimatePresence>
                     {showModelSelector && (
@@ -481,37 +503,77 @@ export const ChatInput: React.FC<ChatInputProps & {
                         transition={{ duration: 0.12, ease: 'easeOut' }}
                         className="absolute bottom-full left-0 mb-2 w-72 max-h-[60vh] overflow-auto bg-background rounded-xl border border-border shadow-xl z-50"
                       >
+                        {providerInfo && (
+                          <div className="px-3 py-2 border-b border-border/50">
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <div
+                                className="w-3 h-3 rounded flex items-center justify-center text-white text-[6px] font-bold shrink-0"
+                                style={{ backgroundColor: providerInfo.color }}
+                              >
+                                {providerInfo.name.charAt(0)}
+                              </div>
+                              <span>{providerInfo.name}</span>
+                            </div>
+                          </div>
+                        )}
                         <div className="p-2">
-                          {Object.entries(GEMINI_MODELS).map(([key, model]) => (
-                            <motion.button
-                              key={key}
-                              whileHover={{ scale: 1.01, x: 4 }}
-                              whileTap={{ scale: 0.98 }}
-                              onClick={() => handleModelSelect(key as GeminiModelKey)}
-                              className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
-                                selectedModel === key
-                                  ? 'bg-primary/15 text-primary border border-primary/20'
-                                  : 'hover:bg-muted/50 text-foreground'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <GeminiLogo size={14} />
-                                  <div>
-                                    <div className="font-medium text-sm">{model.displayName}</div>
-                                    <div className="text-xs text-muted-foreground mt-0.5">{model.description}</div>
+                          {availableModels.map((model) => {
+                            const isSelected = selectedModelId === model.id
+                            // For the selected model, show reasoning effort (clickable to cycle)
+                            // For unselected models, show cost tier (static)
+                            const badgeLabel = isSelected ? reasoningEffort : model.costTier
+                            const effortColors = {
+                              low: 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300',
+                              medium: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300',
+                              high: 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300',
+                              free: 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300',
+                            }
+
+                            return (
+                              <motion.button
+                                key={model.id}
+                                whileHover={{ scale: 1.01, x: 4 }}
+                                whileTap={{ scale: 0.98 }}
+                                onClick={() => handleModelSelect(model.id)}
+                                className={`w-full text-left p-3 rounded-lg transition-all duration-200 ${
+                                  isSelected
+                                    ? 'bg-primary/15 text-primary border border-primary/20'
+                                    : 'hover:bg-muted/50 text-foreground'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    {isGeminiProvider ? (
+                                      <GeminiLogo size={14} />
+                                    ) : (
+                                      <div
+                                        className="w-3.5 h-3.5 rounded flex items-center justify-center text-white text-[7px] font-bold shrink-0"
+                                        style={{ backgroundColor: providerInfo?.color || '#4285F4' }}
+                                      >
+                                        {providerInfo?.name?.charAt(0) || 'G'}
+                                      </div>
+                                    )}
+                                    <div>
+                                      <div className="font-medium text-sm">{model.name}</div>
+                                      <div className="text-xs text-muted-foreground mt-0.5">{model.description}</div>
+                                    </div>
+                                  </div>
+                                  <div
+                                    onClick={isSelected ? (e: React.MouseEvent) => {
+                                      e.stopPropagation()
+                                      onCycleReasoningEffort?.()
+                                    } : undefined}
+                                    className={`px-2 py-1 text-xs rounded-full transition-all duration-150 ${effortColors[badgeLabel] || effortColors.low} ${
+                                      isSelected ? 'cursor-pointer hover:ring-2 hover:ring-primary/30 hover:scale-105' : ''
+                                    }`}
+                                    title={isSelected ? `Reasoning: ${reasoningEffort} — click to cycle` : model.costTier}
+                                  >
+                                    {badgeLabel}
                                   </div>
                                 </div>
-                                <div className={`px-2 py-1 text-xs rounded-full ${
-                                  model.costTier === 'low' ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300' :
-                                  model.costTier === 'medium' ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300' :
-                                  'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300'
-                                }`}>
-                                  {model.costTier}
-                                </div>
-                              </div>
-                            </motion.button>
-                          ))}
+                              </motion.button>
+                            )
+                          })}
                         </div>
                       </motion.div>
                     )}
@@ -527,7 +589,7 @@ export const ChatInput: React.FC<ChatInputProps & {
                   className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border border-border hover:bg-muted/50 text-foreground transition-all duration-200 ${
                     isUploading ? 'opacity-50 cursor-not-allowed' : ''
                   }`}
-                  title={isUploading ? "Uploading..." : "Upload PDF"}
+                  title={isUploading ? "Uploading..." : "Upload document or image"}
                 >
                   {isUploading ? (
                     <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />

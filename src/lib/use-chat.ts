@@ -39,7 +39,7 @@ export function useChat(documentId?: string, conversationId?: string, selectedDo
   }, [documentId, conversationId, store.loadConversation, store.setDocumentContext]) // store object recreated every render - individual function deps are correct pattern
 
   // Send message with simplified API
-  const sendMessage = useCallback(async (content: string, modelOverride?: import('./ai-config').GeminiModelKey) => {
+  const sendMessage = useCallback(async (content: string, modelOverride?: string) => {
     if (!content.trim()) return
 
     try {
@@ -54,7 +54,7 @@ export function useChat(documentId?: string, conversationId?: string, selectedDo
 
 
   // Regenerate last message with optional model override
-  const regenerateLastMessage = useCallback(async (modelOverride?: import('./ai-config').GeminiModelKey) => {
+  const regenerateLastMessage = useCallback(async (modelOverride?: string) => {
     try {
       await store.regenerateLastMessage(modelOverride, selectedDocuments)
       store.clearErrorStates()

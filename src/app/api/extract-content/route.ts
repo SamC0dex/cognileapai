@@ -118,15 +118,15 @@ export async function POST(req: NextRequest) {
       console.log(preview + '...')
       console.log('='.repeat(50))
 
-      // Count actual tokens using Gemini API
+      // Count tokens using estimation
       let actualTokens: number | null = null
       let tokenCountMethod: 'api_count' | 'estimation' = 'estimation'
-      
+
       try {
         const { countDocumentTokens } = await import('@/lib/token-counter')
         const result = await countDocumentTokens(
           documentId,
-          'gemini-2.0-flash-exp', // Use the model for counting
+          'gemini-3-flash', // Model reference for cache key
           extractedText
         )
         actualTokens = result.totalTokens
