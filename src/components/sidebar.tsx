@@ -13,7 +13,8 @@ import {
   Sun,
   Moon,
   Palette,
-  LogOut
+  LogOut,
+  Sparkles
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
@@ -39,9 +40,11 @@ interface SidebarProps {
   onCollapsedChange?: (collapsed: boolean) => void
   isFilesPanelOpen?: boolean
   onFilesPanelToggle?: () => void
+  isStudyToolsPanelOpen?: boolean
+  onStudyToolsPanelToggle?: () => void
 }
 
-export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOpen = false, onFilesPanelToggle }: SidebarProps) {
+export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOpen = false, onFilesPanelToggle, isStudyToolsPanelOpen = false, onStudyToolsPanelToggle }: SidebarProps) {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { user, profile, loading } = useUser()
@@ -101,6 +104,14 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOp
       href: '/chat',
       icon: ChatDuotoneIcon,
       current: pathname?.startsWith('/chat') || false
+    },
+    {
+      name: 'Study Tools',
+      href: '#',
+      icon: Sparkles,
+      current: isStudyToolsPanelOpen,
+      isPanel: true,
+      panelType: 'studyTools' as const
     },
     {
       name: 'My Courses',
@@ -293,7 +304,11 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOp
               key={item.name}
               onClick={() => {
                 if (item.isPanel) {
-                  onFilesPanelToggle?.();
+                  if ('panelType' in item && item.panelType === 'studyTools') {
+                    onStudyToolsPanelToggle?.();
+                  } else {
+                    onFilesPanelToggle?.();
+                  }
                 } else {
                   console.log(`Direct navigation to ${item.href}`);
                   window.location.href = item.href;

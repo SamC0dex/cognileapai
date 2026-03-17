@@ -124,18 +124,17 @@ interface StudyToolCardProps {
   type: StudyToolType
   onClick: () => void
   isCurrentlyGenerating: boolean
-  hasContext: boolean
+  hasContext?: boolean
 }
 
 const StudyToolCard: React.FC<StudyToolCardProps> = React.memo(({
   type,
   onClick,
-  isCurrentlyGenerating,
-  hasContext
+  isCurrentlyGenerating
 }) => {
   const tool = STUDY_TOOLS[type]
   const isPlaceholder = 'disabled' in tool && tool.disabled
-  const isDisabled = isPlaceholder || (!hasContext && type !== 'flashcards')
+  const isDisabled = isPlaceholder
   const IconComponent = iconMap[type]
   const prefersReducedMotion = useReducedMotion()
 
@@ -244,27 +243,18 @@ const StudyToolCard: React.FC<StudyToolCardProps> = React.memo(({
         <motion.span
           className="text-xs font-medium text-muted-foreground"
         >
-          {isPlaceholder
-            ? 'Coming Soon'
-            : !hasContext && type !== 'flashcards'
-            ? 'Needs Document'
-            : 'Generate'
-          }
+          {isPlaceholder ? 'Coming Soon' : 'Generate'}
         </motion.span>
 
-        {!hasContext && type !== 'flashcards' ? (
-          <AlertCircle className="w-4 h-4 text-amber-500" />
-        ) : (
-          <motion.div
-            animate={isCurrentlyGenerating ? { scale: [1, 1.2, 1] } : { scale: 1 }}
-            transition={{ duration: 1, repeat: isCurrentlyGenerating ? Infinity : 0 }}
-          >
-            <Sparkles className={cn(
-              "w-4 h-4 transition-colors",
-              tool.textColor
-            )} />
-          </motion.div>
-        )}
+        <motion.div
+          animate={isCurrentlyGenerating ? { scale: [1, 1.2, 1] } : { scale: 1 }}
+          transition={{ duration: 1, repeat: isCurrentlyGenerating ? Infinity : 0 }}
+        >
+          <Sparkles className={cn(
+            "w-4 h-4 transition-colors",
+            tool.textColor
+          )} />
+        </motion.div>
       </div>
     </motion.div>
   )
@@ -1289,23 +1279,6 @@ const ExpandedPanel: React.FC<{
             {/* Flashcard Sets Section */}
             <FlashcardSetsSection />
 
-            {/* Context tip */}
-            {!hasContext && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3, ...smoothTransition }}
-                className="mt-4 p-3 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
-              >
-                <div className="flex items-start gap-2">
-                  <span className="text-amber-600 dark:text-amber-400">💡</span>
-                  <p className="text-xs text-muted-foreground">
-                    <strong>Tip:</strong>{' '}
-                    Upload a document or start a conversation to unlock study tools.
-                  </p>
-                </div>
-              </motion.div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -1596,6 +1569,202 @@ const FlashcardSetsSection: React.FC = () => {
   )
 }
 
+// Embedded content for sidebar panel mode - full width, no panel shell or header
+const EmbeddedStudyToolsContent: React.FC<{
+  onGenerateStudyTool: (type: StudyToolType) => void
+  hasContext: boolean
+  onClose?: () => void
+}> = ({ onGenerateStudyTool, hasContext, onClose }) => {
+  const {
+    isCanvasOpen,
+    isCanvasFullscreen,
+    canvasContent,
+    closeCanvas,
+    toggleCanvasFullscreen,
+    copyToClipboard,
+    downloadAsPDF,
+    downloadAsDOCX,
+    isGeneratingType,
+    friendlyError,
+    clearError,
+    retryLastGeneration,
+    lastFailedGeneration
+  } = useStudyToolsStore()
+  const { isViewerOpen, currentFlashcardSet, isFullscreen, closeViewer, toggleFullscreen } = useFlashcardStore()
+  const [isCopied, setIsCopied] = React.useState(false)
+  const prefersReducedMotion = useReducedMotion()
+
+  const handleErrorAction = React.useCallback((action: ErrorAction) => {
+    switch (action.intent) {
+      case 'retry':
+        clearError()
+        if (lastFailedGeneration) {
+          void retryLastGeneration()
+        }
+        break
+      case 'dismiss':
+      default:
+        clearError()
+        break
+    }
+  }, [clearError, lastFailedGeneration, retryLastGeneration])
+
+  const handleCopy = React.useCallback(async () => {
+    if (!canvasContent) return
+    try {
+      const success = await copyToClipboard(canvasContent.content)
+      if (success) {
+        setIsCopied(true)
+        setTimeout(() => setIsCopied(false), 2000)
+      }
+    } catch {
+      try {
+        await navigator.clipboard.writeText(canvasContent.content)
+        setIsCopied(true)
+        setTimeout(() => setIsCopied(false), 2000)
+      } catch { /* ignore */ }
+    }
+  }, [canvasContent, copyToClipboard])
+
+  const handleDownloadPDF = React.useCallback(async () => {
+    if (!canvasContent) return
+    try { await downloadAsPDF(canvasContent) } catch { /* ignore */ }
+  }, [canvasContent, downloadAsPDF])
+
+  const handleDownloadDOCX = React.useCallback(async () => {
+    if (!canvasContent) return
+    try { await downloadAsDOCX(canvasContent) } catch { /* ignore */ }
+  }, [canvasContent, downloadAsDOCX])
+
+  return (
+    <div className="h-full flex flex-col">
+      {friendlyError && (
+        <ActionableErrorPanel error={friendlyError} onAction={handleErrorAction} />
+      )}
+
+      <AnimatePresence mode="wait">
+        {isCanvasOpen && canvasContent && !isCanvasFullscreen ? (
+          <motion.div
+            key="canvas"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            {/* Canvas Header */}
+            <div className="flex items-center justify-between p-3 border-b border-border">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div className={cn(
+                  "p-1.5 rounded-lg",
+                  STUDY_TOOLS[canvasContent.type].color,
+                  STUDY_TOOLS[canvasContent.type].borderColor,
+                  "border"
+                )}>
+                  {React.createElement(iconMap[canvasContent.type], {
+                    className: cn("w-4 h-4", STUDY_TOOLS[canvasContent.type].textColor)
+                  })}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-sm truncate">{canvasContent.title}</h3>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {new Date(canvasContent.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="icon" onClick={toggleCanvasFullscreen} className="w-7 h-7" title="Fullscreen">
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="outline" size="icon" onClick={handleCopy} className={cn("w-7 h-7", isCopied && "bg-green-50 text-green-700")} title="Copy">
+                  {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" className="w-7 h-7" title="Export">
+                      <Download className="w-3.5 h-3.5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem onClick={handleDownloadPDF}>
+                      <FileText className="w-3.5 h-3.5 mr-2 text-red-500" />
+                      PDF
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleDownloadDOCX}>
+                      <FileText className="w-3.5 h-3.5 mr-2 text-blue-500" />
+                      DOCX
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button variant="ghost" size="icon" onClick={closeCanvas} className="w-7 h-7 hover:bg-red-50 hover:text-red-600">
+                  <X className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+            {/* Canvas Content */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="prose prose-sm max-w-none dark:prose-invert">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {canvasContent.content}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </motion.div>
+        ) : isViewerOpen && currentFlashcardSet && !isFullscreen ? (
+          <motion.div
+            key="flashcards"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <FlashcardViewer
+              flashcards={currentFlashcardSet.cards}
+              title={currentFlashcardSet.title}
+              onClose={closeViewer}
+              isFullscreen={false}
+              onToggleFullscreen={toggleFullscreen}
+              className="h-full"
+            />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="tools"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 p-4 space-y-3 overflow-y-auto"
+          >
+            <p className="text-sm text-muted-foreground mb-4">
+              Generate AI-powered study materials from your documents and conversations.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              {Object.entries(STUDY_TOOLS).map(([type]) => (
+                <StudyToolCard
+                  key={type}
+                  type={type as StudyToolType}
+                  onClick={() => onGenerateStudyTool(type as StudyToolType)}
+                  isCurrentlyGenerating={isGeneratingType(type as StudyToolType)}
+                  hasContext={hasContext}
+                />
+              ))}
+            </div>
+
+            <div className="mt-6 mb-4">
+              <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+            </div>
+
+            <GeneratedDocumentsSection />
+            <FlashcardSetsSection />
+
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 interface SelectedDocument {
   id: string
   title: string
@@ -1609,7 +1778,9 @@ const StudyToolsPanelContent: React.FC<{
   selectedDocuments: SelectedDocument[]
   primaryDocument: SelectedDocument | null
   hasMessages: boolean
-}> = React.memo(({ documentId, conversationId, selectedDocuments, primaryDocument, hasMessages }) => {
+  embedded?: boolean
+  onClose?: () => void
+}> = React.memo(({ documentId, conversationId, selectedDocuments, primaryDocument, hasMessages, embedded = false, onClose }) => {
   const {
     isPanelExpanded,
     isGeneratingType,
@@ -1762,6 +1933,39 @@ const StudyToolsPanelContent: React.FC<{
     setFlashcardDialog({ isOpen: false, context: null })
   }, [])
 
+  // Embedded mode: render content directly without panel shell (for sidebar panel)
+  if (embedded) {
+    return (
+      <>
+        <EmbeddedStudyToolsContent
+          onGenerateStudyTool={handleGenerateStudyTool}
+          hasContext={hasContext}
+          onClose={onClose}
+        />
+
+        {/* Confirmation Dialog */}
+        {confirmationDialog.studyToolType && (
+          <StudyToolsConfirmationDialog
+            isOpen={confirmationDialog.isOpen}
+            onClose={handleCloseConfirmationDialog}
+            onConfirm={handleConfirmConversationGeneration}
+            onSelectDocument={handleSelectDocument}
+            studyToolType={confirmationDialog.studyToolType}
+            hasMessages={hasMessages}
+          />
+        )}
+
+        {/* Flashcard Customization Dialog */}
+        <FlashcardCustomizationDialog
+          isOpen={flashcardDialog.isOpen}
+          onClose={handleCloseFlashcardDialog}
+          onGenerate={handleFlashcardGenerate}
+          isGenerating={isGeneratingType('flashcards')}
+        />
+      </>
+    )
+  }
+
   return (
     <>
       <AnimatePresence>
@@ -1797,11 +2001,8 @@ const StudyToolsPanelContent: React.FC<{
         isOpen={flashcardDialog.isOpen}
         onClose={handleCloseFlashcardDialog}
         onGenerate={handleFlashcardGenerate}
-        isGenerating={isGeneratingType('flashcards')} // Properly check if flashcards are being generated
+        isGenerating={isGeneratingType('flashcards')}
       />
-
-      {/* Fullscreen Flashcard Viewer - This should be rendered at app level, not here */}
-      {/* Removed fullscreen flashcard viewer - it should be handled at a higher level to respect sidebar layout */}
 
     </>
   )

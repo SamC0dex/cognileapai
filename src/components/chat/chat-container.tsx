@@ -14,11 +14,10 @@ import type { Citation } from './types'
 import { createClient } from '@/lib/supabase/client'
 import { useDocuments } from '@/contexts/documents-context'
 import { useStudyToolsStore } from '@/components/study-tools'
-import { LazyStudyToolsPanel } from '@/components/study-tools/lazy-study-tools-panel'
 import { LazyFlashcardViewer } from '@/components/study-tools/lazy-flashcard-viewer'
 // Fullscreen canvas will be created inline
 import { useFlashcardStore } from '@/lib/flashcard-store'
-import { motion, useReducedMotion } from 'framer-motion'
+
 import type { DocumentUploadedDetail } from '@/types/documents'
 import {
   Copy,
@@ -42,43 +41,6 @@ import { ActionableErrorPanel } from '@/components/error-management/actionable-e
 import { ErrorBoundary } from '@/components/error-management'
 import { translateError } from '@/lib/errors/translator'
 import type { ErrorAction } from '@/lib/errors/types'
-
-// Enhanced chat area width variants for coordinated layout
-const layoutVariants = {
-  // Panel collapsed, no canvas
-  panelCollapsed: {
-    width: 'calc(100% - 48px)',
-    transition: {
-      type: 'spring',
-      stiffness: 400,
-      damping: 40,
-      mass: 0.5,
-      duration: 0.3
-    }
-  },
-  // Panel expanded, no canvas (40% panel, 60% chat)
-  panelExpanded: {
-    width: '60%',
-    transition: {
-      type: 'spring',
-      stiffness: 400,
-      damping: 40,
-      mass: 0.5,
-      duration: 0.3
-    }
-  },
-  // Panel expanded with canvas (50% panel, 50% chat)
-  panelExpandedCanvas: {
-    width: '50%',
-    transition: {
-      type: 'spring',
-      stiffness: 400,
-      damping: 40,
-      mass: 0.5,
-      duration: 0.3
-    }
-  }
-}
 
 // Check if we're in demo mode (Supabase not configured)
 const isDemoMode = !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -115,19 +77,11 @@ const ChatContainerContent: React.FC<{
     addSelectedDocument,
     clearSelectedDocuments
   } = useDocuments()
-  const { isPanelExpanded, isCanvasOpen, isCanvasFullscreen, canvasContent } = useStudyToolsStore()
+  const { isCanvasOpen, isCanvasFullscreen, canvasContent } = useStudyToolsStore()
   const { isViewerOpen, currentFlashcardSet, isFullscreen, closeViewer, toggleFullscreen } = useFlashcardStore()
-  const prefersReducedMotion = useReducedMotion()
 
   // Use primary selected document if no URL document is provided
   const effectiveDocumentId = documentId || primaryDocument?.id
-
-  // Memoize the current layout state for performance
-  const layoutState = useMemo(() => {
-    if (isPanelExpanded && isCanvasOpen) return 'panelExpandedCanvas'
-    if (isPanelExpanded) return 'panelExpanded'
-    return 'panelCollapsed'
-  }, [isCanvasOpen, isPanelExpanded])
 
   // Use the chat hook for all chat functionality
   const {
@@ -485,27 +439,9 @@ const ChatContainerContent: React.FC<{
 
   return (
     <div className="relative h-full flex bg-background">
-      {/* Study Tools Panel - Fixed width sidebar */}
-      <LazyStudyToolsPanel
-        documentId={effectiveDocumentId}
-        conversationId={conversationId}
-        selectedDocuments={selectedDocuments}
-        primaryDocument={primaryDocument}
-        hasMessages={messages.length > 0}
-      />
-
-      {/* Main Chat Area - Flexible width */}
-      <motion.div
+      {/* Main Chat Area - Full width (Study Tools is in sidebar) */}
+      <div
         className="flex flex-col h-full min-w-0 flex-1"
-        variants={layoutVariants}
-        animate={prefersReducedMotion ? undefined : layoutState}
-        style={prefersReducedMotion ? {
-          width: isPanelExpanded && isCanvasOpen
-            ? '50%'
-            : isPanelExpanded
-            ? '60%'
-            : 'calc(100% - 48px)'
-        } : undefined}
       >
         {/* Demo Mode Banner */}
         {isDemoMode && (
@@ -597,7 +533,7 @@ const ChatContainerContent: React.FC<{
           urlSelectedDocument={urlSelectedDocument}
           onRemoveDocument={handleRemoveDocument}
         />
-      </motion.div>
+      </div>
 
       {/* Fullscreen Flashcard Viewer - Rendered at this level to respect sidebar layout */}
       {isViewerOpen && currentFlashcardSet && isFullscreen && (
