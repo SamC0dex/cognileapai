@@ -33,9 +33,21 @@ export interface GenerateOptions {
   reasoningEffort?: 'low' | 'high'
 }
 
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface CompletionResult {
+  text: string
+  usage: TokenUsage | null
+}
+
 export interface StreamChunk {
   text: string
   isComplete?: boolean
+  usage?: TokenUsage | null
 }
 
 /**
@@ -105,7 +117,7 @@ function createOpenAIClient(provider: AIProvider, apiKey: string, model?: string
 export async function generateCompletion(
   config: UserAIConfig,
   options: GenerateOptions
-): Promise<string> {
+): Promise<CompletionResult> {
   // All providers use OpenAI-compatible API (including Kie.ai for Gemini models)
   const client = createOpenAIClient(config.provider, config.apiKey, config.model)
 
@@ -120,7 +132,16 @@ export async function generateCompletion(
     stream: false,
   })
 
-  return response.choices[0]?.message?.content || ''
+  const usage = response.usage ? {
+    promptTokens: response.usage.prompt_tokens,
+    completionTokens: response.usage.completion_tokens,
+    totalTokens: response.usage.total_tokens,
+  } : null
+
+  return {
+    text: response.choices[0]?.message?.content || '',
+    usage,
+  }
 }
 
 /**
@@ -144,6 +165,7 @@ export async function* generateCompletionStream(
       max_tokens: options.maxTokens || 4096,
       temperature: options.temperature ?? 0.7,
       stream: true as const,
+      stream_options: { include_usage: true },
       ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
     }
 
@@ -153,6 +175,7 @@ export async function* generateCompletionStream(
   }
 
   let accumulatedText = ''
+  let finalUsage: TokenUsage | null = null
 
   try {
     for await (const chunk of stream) {
@@ -161,12 +184,21 @@ export async function* generateCompletionStream(
         accumulatedText += text
         yield { text, isComplete: false }
       }
+
+      // The final chunk with stream_options.include_usage contains usage data
+      if (chunk.usage) {
+        finalUsage = {
+          promptTokens: chunk.usage.prompt_tokens,
+          completionTokens: chunk.usage.completion_tokens,
+          totalTokens: chunk.usage.total_tokens,
+        }
+      }
     }
   } catch (error) {
     throw translateProviderError(error, config.provider)
   }
 
-  yield { text: '', isComplete: true }
+  yield { text: '', isComplete: true, usage: finalUsage }
 }
 
 /**

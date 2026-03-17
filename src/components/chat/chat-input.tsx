@@ -10,6 +10,8 @@ import { toast } from 'sonner'
 import type { ChatInputProps } from './types'
 import type { DocumentRecord, DocumentUploadedDetail } from '@/types/documents'
 import { useDocuments } from '@/contexts/documents-context'
+import { ModelInfoPopover } from '@/components/model-info-popover'
+import { findModel } from '@/lib/model-registry'
 
 const MIN_HEIGHT = 44 // Minimum height for textarea
 const MAX_HEIGHT = 144 // Maximum height (4 lines * 36px)
@@ -553,8 +555,21 @@ export const ChatInput: React.FC<ChatInputProps & {
                                         {providerInfo?.name?.charAt(0) || 'G'}
                                       </div>
                                     )}
-                                    <div>
-                                      <div className="font-medium text-sm">{model.name}</div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-medium text-sm">{model.name}</span>
+                                        {(() => {
+                                          const fullModel = findModel(model.id, model.provider)
+                                          return fullModel ? (
+                                            <ModelInfoPopover
+                                              model={fullModel}
+                                              side="right"
+                                              align="start"
+                                              iconSize={13}
+                                            />
+                                          ) : null
+                                        })()}
+                                      </div>
                                       <div className="text-xs text-muted-foreground mt-0.5">{model.description}</div>
                                     </div>
                                   </div>

@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MemoizedMarkdown } from './memoized-markdown'
+import { ThinkingPhrases } from './thinking-phrases'
 import type { ChatMessageProps, Citation } from './types'
 import { GeminiLogo } from '@/components/icons/gemini-logo'
 
@@ -247,32 +248,13 @@ export const ChatMessage: React.FC<ChatMessageProps & {
           <div
             className={`px-4 py-3 rounded-2xl text-[15px] leading-relaxed relative transition-all duration-200 ${
               role === 'user'
-                ? 'bg-primary/8 text-foreground rounded-br-md border border-primary/15 shadow-sm hover:shadow-md'
-                : 'bg-background text-foreground rounded-bl-md border border-border/40 shadow-sm hover:shadow-md hover:border-border/60'
+                ? 'bg-primary/10 dark:bg-primary/15 text-foreground rounded-br-md border border-primary/20 dark:border-primary/25 shadow-sm hover:shadow-md'
+                : 'bg-muted/50 dark:bg-muted/30 text-foreground rounded-bl-md border border-border/50 dark:border-border/40 shadow-sm hover:shadow-md hover:border-border/70 dark:hover:border-border/60'
             }`}
           >
-            {/* Elegant loading dots - no text, just beautiful animation */}
+            {/* Dynamic thinking phrases while waiting for response */}
             {isStreaming && role === 'assistant' && content.length === 0 && (
-              <div className="flex items-center justify-start py-2">
-                <div className="flex items-center space-x-1">
-                  {[0, 1, 2].map((i) => (
-                    <motion.div
-                      key={i}
-                      animate={{
-                        opacity: [0.3, 1, 0.3],
-                        scale: [0.8, 1, 0.8]
-                      }}
-                      transition={{
-                        duration: 1.4,
-                        repeat: Infinity,
-                        delay: i * 0.2,
-                        ease: "easeInOut"
-                      }}
-                      className="w-1.5 h-1.5 bg-primary/60 rounded-full"
-                    />
-                  ))}
-                </div>
-              </div>
+              <ThinkingPhrases />
             )}
 
             {/* Optimized Markdown Content with Memoization */}

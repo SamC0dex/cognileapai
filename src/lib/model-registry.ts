@@ -7,6 +7,8 @@
 
 export type AIProvider = 'gemini' | 'openrouter' | 'laozhang' | 'kie'
 
+export type InputFileType = 'image' | 'audio' | 'video' | 'pdf'
+
 export interface AIModel {
   id: string              // Model ID used in API calls
   name: string            // Human-readable name
@@ -16,6 +18,9 @@ export interface AIModel {
   costTier: 'free' | 'low' | 'medium' | 'high'
   capabilities: string[]  // e.g. ['chat', 'vision', 'code']
   description: string
+  inputCostPer1M?: number  // USD per 1M input tokens
+  outputCostPer1M?: number // USD per 1M output tokens
+  supportedInputs?: InputFileType[] // Accepted file types beyond text
 }
 
 export interface ProviderInfo {
@@ -81,6 +86,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Latest & most capable Gemini model',
+      inputCostPer1M: 2.00,
+      outputCostPer1M: 12.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-3-flash-preview',
@@ -91,6 +99,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Fast next-gen model with strong reasoning',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 3.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-3.1-flash-lite-preview',
@@ -101,6 +112,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code'],
       description: 'Ultra-fast lightweight Gemini 3.1',
+      inputCostPer1M: 0.25,
+      outputCostPer1M: 1.50,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-2.5-pro',
@@ -111,6 +125,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Stable pro model for complex reasoning',
+      inputCostPer1M: 1.25,
+      outputCostPer1M: 10.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-2.5-flash',
@@ -121,6 +138,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code'],
       description: 'Balanced speed and capability',
+      inputCostPer1M: 0.30,
+      outputCostPer1M: 2.50,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-2.5-flash-lite',
@@ -131,6 +151,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code'],
       description: 'Cheapest Gemini for quick tasks',
+      inputCostPer1M: 0.10,
+      outputCostPer1M: 0.40,
+      supportedInputs: ['image', 'pdf'],
     },
   ],
 
@@ -146,6 +169,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'OpenAI flagship — most capable GPT model',
+      inputCostPer1M: 30.00,
+      outputCostPer1M: 180.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'openai/gpt-5.4',
@@ -156,6 +182,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Latest GPT model with 1M+ context',
+      inputCostPer1M: 2.50,
+      outputCostPer1M: 15.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'openai/gpt-5.2',
@@ -166,6 +195,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Strong all-rounder GPT-5 series',
+      inputCostPer1M: 1.75,
+      outputCostPer1M: 14.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'openai/gpt-5.3-codex',
@@ -176,6 +208,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'OpenAI Codex — optimized for code',
+      inputCostPer1M: 0.60,
+      outputCostPer1M: 2.40,
     },
     {
       id: 'openai/gpt-5.2-chat',
@@ -186,6 +220,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code'],
       description: 'Affordable GPT-5 for everyday chat',
+      inputCostPer1M: 1.75,
+      outputCostPer1M: 14.00,
+      supportedInputs: ['image', 'pdf'],
     },
     // -- Anthropic --
     {
@@ -197,6 +234,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Most capable Claude model',
+      inputCostPer1M: 5.00,
+      outputCostPer1M: 25.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'anthropic/claude-sonnet-4.6',
@@ -207,6 +247,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Great balance of speed and intelligence',
+      inputCostPer1M: 3.00,
+      outputCostPer1M: 15.00,
+      supportedInputs: ['image', 'pdf'],
     },
     // -- Google --
     {
@@ -218,6 +261,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Latest Gemini via OpenRouter',
+      inputCostPer1M: 2.00,
+      outputCostPer1M: 12.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'google/gemini-3-flash-preview',
@@ -228,6 +274,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Fast Gemini 3 via OpenRouter',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 3.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     // -- DeepSeek --
     {
@@ -239,6 +288,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'Very affordable high-quality chat',
+      inputCostPer1M: 0.28,
+      outputCostPer1M: 0.42,
     },
     {
       id: 'deepseek/deepseek-r1',
@@ -249,6 +300,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'Strong reasoning at low cost',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 2.18,
     },
     // -- Meta --
     {
@@ -260,6 +313,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code'],
       description: 'Meta open-source Llama 4',
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      supportedInputs: ['image'],
     },
     // -- Qwen --
     {
@@ -271,6 +327,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'Alibaba Qwen 3.5 — 1M context',
+      inputCostPer1M: 0.26,
+      outputCostPer1M: 1.56,
     },
     // -- Mistral --
     {
@@ -282,6 +340,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'Mistral flagship model',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 1.50,
+      supportedInputs: ['image'],
     },
     // -- OpenRouter Free --
     {
@@ -293,6 +354,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'free',
       capabilities: ['chat', 'code'],
       description: 'OpenRouter Hunter Alpha — free model',
+      inputCostPer1M: 0,
+      outputCostPer1M: 0,
     },
     {
       id: 'openrouter/healer-alpha',
@@ -303,6 +366,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'free',
       capabilities: ['chat', 'code'],
       description: 'OpenRouter Healer Alpha — free model',
+      inputCostPer1M: 0,
+      outputCostPer1M: 0,
     },
     // -- xAI --
     {
@@ -314,6 +379,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'xAI Grok with 2M context window',
+      inputCostPer1M: 2.00,
+      outputCostPer1M: 6.00,
+      supportedInputs: ['image', 'pdf'],
     },
   ],
 
@@ -328,6 +396,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'OpenAI reasoning flagship via LaoZhang',
+      inputCostPer1M: 120.00,
+      outputCostPer1M: 120.00,
     },
     {
       id: 'o3',
@@ -338,6 +408,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'Strong reasoning model via LaoZhang',
+      inputCostPer1M: 2.00,
+      outputCostPer1M: 8.00,
     },
     {
       id: 'o4-mini',
@@ -348,6 +420,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'Affordable reasoning via LaoZhang',
+      inputCostPer1M: 1.00,
+      outputCostPer1M: 4.00,
     },
     {
       id: 'gpt-4o',
@@ -358,6 +432,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code'],
       description: 'OpenAI GPT-4o via LaoZhang',
+      inputCostPer1M: 2.50,
+      outputCostPer1M: 10.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'gpt-4o-mini',
@@ -368,6 +445,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code'],
       description: 'Affordable GPT-4o via LaoZhang',
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'claude-opus-4-20250515',
@@ -378,6 +458,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Most capable Claude via LaoZhang',
+      inputCostPer1M: 5.00,
+      outputCostPer1M: 25.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'claude-sonnet-4-20250514',
@@ -388,6 +471,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Balanced Claude via LaoZhang',
+      inputCostPer1M: 3.00,
+      outputCostPer1M: 15.00,
+      supportedInputs: ['image', 'pdf'],
     },
     {
       id: 'claude-3-5-haiku-20241022',
@@ -398,6 +484,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code'],
       description: 'Fast affordable Claude via LaoZhang',
+      inputCostPer1M: 0.25,
+      outputCostPer1M: 1.25,
     },
     {
       id: 'gemini-2.5-pro',
@@ -408,6 +496,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'medium',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Google Gemini Pro via LaoZhang',
+      inputCostPer1M: 1.25,
+      outputCostPer1M: 10.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-2.5-flash',
@@ -418,6 +509,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code'],
       description: 'Google Gemini Flash via LaoZhang',
+      inputCostPer1M: 0.30,
+      outputCostPer1M: 2.50,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'deepseek-chat',
@@ -428,6 +522,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'DeepSeek V3 via LaoZhang',
+      inputCostPer1M: 0.28,
+      outputCostPer1M: 0.42,
     },
     {
       id: 'deepseek-reasoner',
@@ -438,11 +534,13 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'DeepSeek R1 via LaoZhang',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 2.18,
     },
   ],
 
   // ─── Kie.ai (7 models from marketplace — March 2026) ──────────────
-  // Cost tiers: 'low' for flash/standard models, 'high' for pro/flagship
+  // Pricing from kie.ai model pages — ~70% cheaper than official rates
   kie: [
     {
       id: 'gemini-3-flash',
@@ -453,6 +551,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Best balance of speed, cost, and capability',
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.90,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-2.5-flash',
@@ -463,6 +564,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'vision', 'code'],
       description: 'Fast and affordable Gemini 2.5',
+      inputCostPer1M: 0.09,
+      outputCostPer1M: 0.75,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gpt-codex',
@@ -473,6 +577,8 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'low',
       capabilities: ['chat', 'code', 'reasoning'],
       description: 'OpenAI Codex — optimized for code generation',
+      inputCostPer1M: 0.38,
+      outputCostPer1M: 3.00,
     },
     {
       id: 'gemini-3-pro',
@@ -483,6 +589,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Most capable Gemini 3 for complex tasks',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 3.50,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-3.1-pro',
@@ -493,6 +602,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Latest Google Gemini via Kie.ai',
+      inputCostPer1M: 0.50,
+      outputCostPer1M: 3.50,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gemini-2.5-pro',
@@ -503,6 +615,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'Gemini 2.5 Pro for deep reasoning',
+      inputCostPer1M: 0.38,
+      outputCostPer1M: 3.00,
+      supportedInputs: ['image', 'audio', 'video', 'pdf'],
     },
     {
       id: 'gpt-5-2',
@@ -513,6 +628,9 @@ export const DEFAULT_MODELS: Record<AIProvider, AIModel[]> = {
       costTier: 'high',
       capabilities: ['chat', 'vision', 'code', 'reasoning'],
       description: 'OpenAI flagship model via Kie.ai',
+      inputCostPer1M: 0.44,
+      outputCostPer1M: 3.50,
+      supportedInputs: ['image', 'pdf'],
     },
   ],
 }

@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button, Card, CardHeader, CardTitle, CardContent, Input, Badge } from '@/components/ui'
-import { Check, Loader2, Search, Zap, Brain, Code, Eye, Star } from 'lucide-react'
+import { Check, Loader2, Search, Zap, Brain, Code, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { PROVIDERS, DEFAULT_MODELS, type AIProvider, type AIModel } from '@/lib/model-registry'
 import { cn } from '@/lib/utils'
+import { ModelInfoPopover } from '@/components/model-info-popover'
 
 interface UserPreferences {
   default_provider: AIProvider
@@ -292,8 +293,14 @@ function ModelCard({
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
+        <div className="flex items-center gap-1.5 mb-0.5">
           <span className="text-sm font-medium truncate">{model.name}</span>
+          <ModelInfoPopover
+            model={model}
+            side="right"
+            align="start"
+            iconSize={14}
+          />
           <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', costColors[model.costTier])}>
             {model.costTier === 'free' ? 'Free' : model.costTier.charAt(0).toUpperCase() + model.costTier.slice(1)}
           </span>

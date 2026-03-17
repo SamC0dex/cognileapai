@@ -551,7 +551,7 @@ export async function POST(req: NextRequest) {
 
     if (userAIConfig) {
       // Use user's configured provider
-      resultText = await generateCompletion(userAIConfig, {
+      const completionResult = await generateCompletion(userAIConfig, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -559,6 +559,7 @@ export async function POST(req: NextRequest) {
         maxTokens: TOOL_TOKEN_ALLOCATIONS[type] || 16384,
         temperature: 0.7,
       })
+      resultText = completionResult.text
       modelUsed = `${userAIConfig.provider}/${userAIConfig.model}`
       generationDuration = Date.now() - startTime
     } else {

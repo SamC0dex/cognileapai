@@ -109,18 +109,19 @@ export function createConversationTokensWithActual(
     method: 'api_count' | 'estimation'
   }
 ): ConversationTokens {
-  // Use actual counts for system and document, estimate for messages
+  // Document context tokens are already included in the API's input token count
+  // (part of user message tokens), so we don't add them separately to avoid double-counting
   const messageTokens = estimateConversationTokens(messages, {
     systemPrompt: actualTokens.systemPrompt,
-    documentContext: actualTokens.documentContext
+    documentContext: 0
   })
 
   return {
     ...messageTokens,
     method: actualTokens.method,
     systemTokens: actualTokens.systemPrompt,
-    documentTokens: actualTokens.documentContext,
-    totalTokens: messageTokens.messageTokens + actualTokens.systemPrompt + actualTokens.documentContext
+    documentTokens: 0,
+    totalTokens: messageTokens.messageTokens + actualTokens.systemPrompt
   }
 }
 

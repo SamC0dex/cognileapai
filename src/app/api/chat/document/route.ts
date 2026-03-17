@@ -106,13 +106,14 @@ export async function POST(req: NextRequest) {
 
     let aiResponseText: string
     let modelUsedLabel = 'FLASH_LITE'
+    let tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null
 
     // Try user's configured provider first, fall back to server Gemini
     const aiConfig = user ? await resolveAIConfig(user.id).catch(() => null) : null
 
     if (aiConfig?.userConfig) {
       console.log(`[AI] Using ${aiConfig.provider}/${aiConfig.model} for document chat`)
-      aiResponseText = await generateCompletion(aiConfig.userConfig, {
+      const result = await generateCompletion(aiConfig.userConfig, {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: contextualMessage },
@@ -120,6 +121,8 @@ export async function POST(req: NextRequest) {
         maxTokens: 2048,
         temperature: 0.5,
       })
+      aiResponseText = result.text
+      tokenUsage = result.usage
       modelUsedLabel = `${aiConfig.provider}/${aiConfig.model}`
     } else {
       // Server fallback — use resolveAIConfig to get Kie config
@@ -142,7 +145,7 @@ export async function POST(req: NextRequest) {
       const serverModel = 'gemini-3-flash'
       console.log(`[AI] Using server Kie.ai/${serverModel} for document chat`)
 
-      aiResponseText = await generateCompletion(
+      const result = await generateCompletion(
         { provider: 'kie', model: serverModel, apiKey: serverKey },
         {
           messages: [
@@ -153,8 +156,12 @@ export async function POST(req: NextRequest) {
           temperature: 0.5,
         }
       )
+      aiResponseText = result.text
+      tokenUsage = result.usage
       modelUsedLabel = `kie/${serverModel}`
     }
+
+    const totalTokens = tokenUsage?.totalTokens ?? Math.ceil(aiResponseText.length / 4)
 
     // Save messages to database
     try {
@@ -164,7 +171,7 @@ export async function POST(req: NextRequest) {
         userMessage: message,
         aiResponse: aiResponseText,
         modelUsed: modelUsedLabel,
-        tokenUsage: Math.ceil(aiResponseText.length / 4),
+        tokenUsage: totalTokens,
         responseTime: Date.now() - startTime
       })
     } catch (error) {
@@ -175,7 +182,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       content: aiResponseText,
       model: modelUsedLabel,
-      usage: { totalTokenCount: Math.ceil(aiResponseText.length / 4) }
+      usage: {
+        totalTokenCount: totalTokens,
+        promptTokens: tokenUsage?.promptTokens,
+        completionTokens: tokenUsage?.completionTokens,
+        method: tokenUsage ? 'api_count' : 'estimation',
+      }
     }, {
       headers: {
         'Content-Type': 'application/json',

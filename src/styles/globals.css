@@ -490,6 +490,31 @@ html.theme-instant, html.theme-instant *, html.theme-instant *::before, html.the
   }
 }
 
+/* Thinking dots — bouncing "message incoming" animation */
+@keyframes thinking-bounce {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.thinking-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: hsl(var(--primary) / 0.7);
+  animation: thinking-bounce 0.9s ease-in-out infinite;
+}
+
+.thinking-dot-1 { animation-delay: 0s; }
+.thinking-dot-2 { animation-delay: 0.15s; }
+.thinking-dot-3 { animation-delay: 0.3s; }
+
 /* Loading states */
 @keyframes shimmer {
   0% {

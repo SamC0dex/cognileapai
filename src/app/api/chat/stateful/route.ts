@@ -250,6 +250,7 @@ export async function POST(req: NextRequest) {
       async start(controller) {
         try {
           let fullResponse = ''
+          let apiUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null
 
           for await (const chunk of generateCompletionStream(configForStream, {
             messages: apiMessages,
@@ -263,12 +264,21 @@ export async function POST(req: NextRequest) {
             }
 
             if (chunk.isComplete) {
-              const userMessageTokens = Math.ceil(lastMessage.content.length / 4)
-              const assistantMessageTokens = Math.ceil(fullResponse.length / 4)
+              // Use real token counts from the API if available, fall back to estimation
+              if (chunk.usage) {
+                apiUsage = chunk.usage
+              }
+
+              const userMessageTokens = apiUsage?.promptTokens ?? Math.ceil(lastMessage.content.length / 4)
+              const assistantMessageTokens = apiUsage?.completionTokens ?? Math.ceil(fullResponse.length / 4)
+              const totalTokens = apiUsage?.totalTokens ?? (userMessageTokens + assistantMessageTokens)
+              const tokenMethod = apiUsage ? 'api_count' as const : 'estimation' as const
 
               const metadata = {
                 usage: {
-                  totalTokens: userMessageTokens + assistantMessageTokens,
+                  totalTokens,
+                  promptTokens: apiUsage?.promptTokens,
+                  completionTokens: apiUsage?.completionTokens,
                 },
                 model: actualModelName,
                 modelKey: actualModelId,
@@ -282,19 +292,19 @@ export async function POST(req: NextRequest) {
                 tokenBreakdown: {
                   systemPrompt: systemPromptTokens,
                   documentContext: documentContextTokens,
-                  method: 'api_count' as const,
+                  method: tokenMethod,
                   isNewSession: true,
                 },
                 messageTokens: {
                   user: userMessageTokens,
                   assistant: assistantMessageTokens,
-                  method: 'estimation' as const,
+                  method: tokenMethod,
                 },
               }
 
               controller.enqueue(new TextEncoder().encode(`8:${JSON.stringify(metadata)}\n`))
 
-              // Save to database
+              // Save to database with actual token counts so they persist across refreshes
               if (conversationId) {
                 try {
                   await saveMessageToDatabase({
@@ -302,14 +312,27 @@ export async function POST(req: NextRequest) {
                     userId: user.id,
                     role: 'user',
                     content: lastMessage.content,
-                    metadata: { chatType, documentId, modelUsed: actualModelId },
+                    metadata: {
+                      chatType,
+                      documentId,
+                      modelUsed: actualModelId,
+                      tokens: userMessageTokens,
+                      tokenMethod,
+                    },
                   })
                   await saveMessageToDatabase({
                     conversationId,
                     userId: user.id,
                     role: 'assistant',
                     content: fullResponse,
-                    metadata: { chatType, documentId, modelUsed: actualModelId },
+                    metadata: {
+                      chatType,
+                      documentId,
+                      modelUsed: actualModelId,
+                      model: actualModelName,
+                      tokens: assistantMessageTokens,
+                      tokenMethod,
+                    },
                   })
                 } catch (dbErr) {
                   console.error('[StatefulChat] Error saving messages:', dbErr)

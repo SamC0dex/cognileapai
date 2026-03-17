@@ -1138,9 +1138,12 @@ export function useChatStore(): StoreShape {
     }))
 
     // Calculate conversation tokens
+    // Note: document context and system prompt tokens are NOT included separately
+    // because they are already counted as part of the input tokens returned by the API.
+    // Only user messages + AI responses matter for the displayed total.
     const tokens = TokenManager.estimateConversation(messagesWithTokens, {
-      systemPrompt: systemPromptTokens,
-      documentContext: documentContextTokens
+      systemPrompt: 0,
+      documentContext: 0
     })
     tokens.conversationId = currentConversation || 'temp-conversation'
     tokens.method = tokenCountMethod // Pass through token counting method for UI display

@@ -96,8 +96,8 @@ export async function routedCompletion(
   const config = await resolveAIConfig(userId)
 
   if (config.userConfig) {
-    const text = await generateCompletion(config.userConfig, options)
-    return { text, config }
+    const result = await generateCompletion(config.userConfig, options)
+    return { text: result.text, config }
   }
 
   // Server fallback — should not normally reach here since resolveAIConfig
