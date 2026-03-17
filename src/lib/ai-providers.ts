@@ -121,7 +121,7 @@ export async function generateCompletion(
   // All providers use OpenAI-compatible API (including Kie.ai for Gemini models)
   const client = createOpenAIClient(config.provider, config.apiKey, config.model)
 
-  const response = await client.chat.completions.create({
+  let response = await client.chat.completions.create({
     model: config.model,
     messages: options.messages.map(m => ({
       role: m.role,
@@ -130,16 +130,32 @@ export async function generateCompletion(
     max_tokens: options.maxTokens || 4096,
     temperature: options.temperature ?? 0.7,
     stream: false,
-  })
+  }) as Record<string, unknown>
+
+  // Kie.ai sometimes returns raw JSON string instead of parsed object
+  if (typeof response === 'string') {
+    try {
+      response = JSON.parse(response)
+    } catch {
+      throw new Error('AI provider returned unparseable response')
+    }
+  }
+
+  const choices = response.choices as Array<{ message?: { content?: string } }> | undefined
+
+  if (!choices || choices.length === 0) {
+    console.error('[AI] No choices in response. Type:', typeof response, 'Keys:', Object.keys(response))
+    throw new Error(`AI provider returned an empty response (no choices). Model: ${config.model}`)
+  }
 
   const usage = response.usage ? {
-    promptTokens: response.usage.prompt_tokens,
-    completionTokens: response.usage.completion_tokens,
-    totalTokens: response.usage.total_tokens,
+    promptTokens: (response.usage as Record<string, number>).prompt_tokens,
+    completionTokens: (response.usage as Record<string, number>).completion_tokens,
+    totalTokens: (response.usage as Record<string, number>).total_tokens,
   } : null
 
   return {
-    text: response.choices[0]?.message?.content || '',
+    text: choices[0]?.message?.content || '',
     usage,
   }
 }

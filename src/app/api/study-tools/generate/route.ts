@@ -6,6 +6,7 @@ import { getStudyToolPrompt, generateStudyToolTitle, type StudyToolPromptType } 
 import { classifyError, addRetryAttempt } from '@/lib/retry-manager'
 import { resolveAIConfig } from '@/lib/ai-router'
 import { generateCompletion, type UserAIConfig } from '@/lib/ai-providers'
+import { recordUsage } from '@/lib/usage-tracker'
 
 // Service role client for background operations only (bypasses RLS)
 const serviceSupabase = createClient(
@@ -40,6 +41,7 @@ interface FallbackResult {
   duration: number
   chunksUsed?: number
   fallbackReason?: string
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null
 }
 
 interface ModelConfig {
@@ -74,7 +76,8 @@ const TOOL_TOKEN_ALLOCATIONS: Record<string, number> = {
   'smart-notes': 32768,    // Long-form content needs more tokens
   'study-guide': 32768,    // Comprehensive guides need space
   'smart-summary': 16384,  // Summaries should be more concise
-  'flashcards': 8192       // JSON arrays don't need as many tokens
+  'flashcards': 8192,      // JSON arrays don't need as many tokens
+  'quiz': 16384             // Quiz JSON with explanations needs more tokens
 }
 
 const MODEL_HIERARCHY: ModelConfig[] = [
@@ -157,7 +160,8 @@ function isContentComplete(content: string, toolType: string): boolean {
   // Tool-specific completion indicators
   switch (toolType) {
     case 'flashcards':
-      // For flashcards, check if JSON is properly closed
+    case 'quiz':
+      // For flashcards/quiz, check if JSON is properly closed
       try {
         JSON.parse(trimmed)
         return true
@@ -225,7 +229,7 @@ async function generateWithFallback(
         })
 
         // Generate via OpenAI-compatible API
-        const response = await client.chat.completions.create({
+        let response = await client.chat.completions.create({
           model: modelConfig.name,
           messages: [
             { role: 'system', content: systemPrompt },
@@ -233,9 +237,23 @@ async function generateWithFallback(
           ],
           temperature: modelConfig.temperature,
           max_tokens: optimalOutputTokens,
-        })
+        }) as Record<string, unknown>
 
-        const resultText = response.choices[0]?.message?.content || ''
+        // Kie.ai sometimes returns raw JSON string instead of parsed object
+        if (typeof response === 'string') {
+          try {
+            response = JSON.parse(response)
+          } catch {
+            throw new Error('AI provider returned unparseable response')
+          }
+        }
+
+        const choices = response.choices as Array<{ message?: { content?: string } }> | undefined
+        if (!choices || choices.length === 0) {
+          throw new Error('AI provider returned empty response (no choices)')
+        }
+
+        const resultText = choices[0]?.message?.content || ''
 
         // Check for truncation or insufficient content
         if (resultText.length < 50) {
@@ -247,11 +265,19 @@ async function generateWithFallback(
           console.warn(`[Fallback] ${modelConfig.name} content appears truncated, may retry with higher token limit`)
         }
 
+        // Extract usage data from response
+        const responseUsage = response.usage ? {
+          promptTokens: (response.usage as Record<string, number>).prompt_tokens ?? 0,
+          completionTokens: (response.usage as Record<string, number>).completion_tokens ?? 0,
+          totalTokens: (response.usage as Record<string, number>).total_tokens ?? 0,
+        } : null
+
         console.log(`[Fallback] Success with ${modelConfig.name} (attempt ${attempt}, ${resultText.length} chars)`)
         return {
           resultText,
           modelUsed: `${modelConfig.name}${attempt > 1 ? ` (attempt ${attempt})` : ''}`,
-          duration: Date.now() - modelStartTime
+          duration: Date.now() - modelStartTime,
+          usage: responseUsage,
         }
 
       } catch (error) {
@@ -335,6 +361,13 @@ interface StudyToolGenerateRequest {
     difficulty: 'easy' | 'medium' | 'hard'
     customInstructions?: string
   }
+  // Quiz-specific options
+  quizOptions?: {
+    numberOfQuestions: 'fewer' | 'standard' | 'more' | 'custom'
+    customCount?: number
+    difficulty: 'easy' | 'medium' | 'hard'
+    customInstructions?: string
+  }
 }
 
 
@@ -350,6 +383,7 @@ export async function POST(req: NextRequest) {
   let documentId: string | undefined
   let conversationId: string | undefined
   let flashcardOptions: StudyToolGenerateRequest['flashcardOptions']
+  let quizOptions: StudyToolGenerateRequest['quizOptions']
   let generationId: string | undefined
 
   try {
@@ -372,6 +406,7 @@ export async function POST(req: NextRequest) {
     documentId = requestData.documentId
     conversationId = requestData.conversationId
     flashcardOptions = requestData.flashcardOptions
+    quizOptions = requestData.quizOptions
 
     // Debug logging
     console.log('[StudyTools] API Request received:', { type, documentId, conversationId })
@@ -383,7 +418,7 @@ export async function POST(req: NextRequest) {
     })
 
     // Validate request
-    if (!type || !['study-guide', 'smart-summary', 'smart-notes', 'flashcards'].includes(type)) {
+    if (!type || !['study-guide', 'smart-summary', 'smart-notes', 'flashcards', 'quiz'].includes(type)) {
       return NextResponse.json(
         { error: 'Invalid study tool type' },
         { status: 400 }
@@ -538,6 +573,12 @@ export async function POST(req: NextRequest) {
         numberOfCards: flashcardOptions.numberOfCards,
         difficulty: flashcardOptions.difficulty,
         customInstructions: flashcardOptions.customInstructions
+      } : undefined,
+      quizOptions ? {
+        numberOfQuestions: quizOptions.numberOfQuestions,
+        customCount: quizOptions.customCount,
+        difficulty: quizOptions.difficulty,
+        customInstructions: quizOptions.customInstructions
       } : undefined
     )
 
@@ -548,6 +589,8 @@ export async function POST(req: NextRequest) {
     let resultText: string
     let modelUsed: string
     let generationDuration: number
+    let usageProvider = 'kie'
+    let usageModel = 'gemini-3-flash'
 
     if (userAIConfig) {
       // Use user's configured provider
@@ -562,12 +605,45 @@ export async function POST(req: NextRequest) {
       resultText = completionResult.text
       modelUsed = `${userAIConfig.provider}/${userAIConfig.model}`
       generationDuration = Date.now() - startTime
+      usageProvider = userAIConfig.provider
+      usageModel = userAIConfig.model
+
+      // Record usage from completion result
+      // Recompute total as input + output for consistency (API total may include hidden tokens)
+      const inputTokens = completionResult.usage?.promptTokens ?? Math.ceil((systemPrompt.length + userPrompt.length) / 4)
+      const outputTokens = completionResult.usage?.completionTokens ?? Math.ceil(resultText.length / 4)
+      recordUsage({
+        userId: user.id,
+        provider: usageProvider,
+        model: usageModel,
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        source: 'study-tool',
+        sourceId: generationId,
+      })
     } else {
       // Use server Gemini with fallback strategy
       const fallbackResult = await generateWithFallback(systemPrompt, userPrompt, type)
       resultText = fallbackResult.resultText
       modelUsed = fallbackResult.modelUsed
       generationDuration = fallbackResult.duration
+      // Extract the actual model name from fallback (e.g. "gemini-3-flash (attempt 2)" -> "gemini-3-flash")
+      usageModel = fallbackResult.modelUsed.split(' ')[0]
+
+      // Record usage — prefer real token counts from API, fall back to estimates
+      const inputTokens = fallbackResult.usage?.promptTokens ?? Math.ceil((systemPrompt.length + userPrompt.length) / 4)
+      const outputTokens = fallbackResult.usage?.completionTokens ?? Math.ceil(resultText.length / 4)
+      recordUsage({
+        userId: user.id,
+        provider: usageProvider,
+        model: usageModel,
+        inputTokens,
+        outputTokens,
+        totalTokens: fallbackResult.usage?.totalTokens ?? (inputTokens + outputTokens),
+        source: 'study-tool',
+        sourceId: generationId,
+      })
     }
 
     const duration = Date.now() - startTime
@@ -576,6 +652,7 @@ export async function POST(req: NextRequest) {
     // Special handling for flashcards - parse JSON response
     let processedContent: string = resultText
     let flashcardData = null
+    let quizData = null
 
     if (type === 'flashcards') {
       try {
@@ -607,6 +684,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Special handling for quiz - parse JSON response
+    if (type === 'quiz') {
+      try {
+        const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
+        quizData = JSON.parse(cleanedText)
+
+        if (!Array.isArray(quizData)) {
+          throw new Error('Quiz data is not an array')
+        }
+
+        // Validate quiz structure
+        quizData.forEach((q: Record<string, unknown>, index: number) => {
+          if (!q.question || !q.id) {
+            throw new Error(`Invalid quiz question at index ${index}: missing required fields`)
+          }
+          if (!Array.isArray(q.options) || (q.options as unknown[]).length !== 4) {
+            throw new Error(`Invalid quiz question at index ${index}: must have exactly 4 options`)
+          }
+          if (typeof q.correctAnswer !== 'number' || (q.correctAnswer as number) < 0 || (q.correctAnswer as number) > 3) {
+            throw new Error(`Invalid quiz question at index ${index}: correctAnswer must be 0-3`)
+          }
+          // Ensure wrongExplanations array exists and has 4 entries
+          if (!Array.isArray(q.wrongExplanations)) {
+            q.wrongExplanations = ['', '', '', '']
+          }
+          while ((q.wrongExplanations as string[]).length < 4) {
+            (q.wrongExplanations as string[]).push('')
+          }
+        })
+
+        console.log(`[StudyTools] Successfully parsed ${quizData.length} quiz questions`)
+        processedContent = resultText
+      } catch (error) {
+        console.error('[StudyTools] Failed to parse quiz JSON:', error)
+        return NextResponse.json(
+          { error: 'Failed to parse generated quiz. The AI response was not in the expected format.' },
+          { status: 500 }
+        )
+      }
+    }
+
     // Generate appropriate title
     const generatedTitle = generateStudyToolTitle(type as StudyToolPromptType, documentTitle)
 
@@ -614,7 +732,8 @@ export async function POST(req: NextRequest) {
     const dbType = type === 'smart-summary' ? 'summary' :
                    type === 'smart-notes' ? 'notes' :
                    type === 'study-guide' ? 'study_guide' :
-                   type === 'flashcards' ? 'flashcards' : type
+                   type === 'flashcards' ? 'flashcards' :
+                   type === 'quiz' ? 'quiz' : type
 
     let outputId: string | null = null
 
@@ -671,6 +790,20 @@ export async function POST(req: NextRequest) {
                 sourceContentLength: documentContent.length,
                 totalCards: flashcardData.length,
                 avgDifficulty: flashcardOptions?.difficulty || 'medium',
+                fallbackStrategy: modelUsed.includes('flash') ? 'applied' : 'none'
+              }
+            }
+          : type === 'quiz' && quizData
+          ? {
+              questions: quizData,
+              options: quizOptions,
+              metadata: {
+                model: modelUsed,
+                duration: generationDuration,
+                contentLength: processedContent.length,
+                sourceContentLength: documentContent.length,
+                totalQuestions: quizData.length,
+                avgDifficulty: quizOptions?.difficulty || 'medium',
                 fallbackStrategy: modelUsed.includes('flash') ? 'applied' : 'none'
               }
             }
@@ -799,6 +932,11 @@ export async function POST(req: NextRequest) {
         cards: flashcardData,
         options: flashcardOptions
       } : {}),
+      // Include quiz-specific data in response
+      ...(type === 'quiz' && quizData ? {
+        questions: quizData,
+        options: quizOptions
+      } : {}),
       metadata: {
         generatedAt: new Date().toISOString(),
         model: modelUsed,
@@ -809,6 +947,10 @@ export async function POST(req: NextRequest) {
         ...(type === 'flashcards' && flashcardData ? {
           totalCards: flashcardData.length,
           avgDifficulty: flashcardOptions?.difficulty || 'medium'
+        } : {}),
+        ...(type === 'quiz' && quizData ? {
+          totalQuestions: quizData.length,
+          avgDifficulty: quizOptions?.difficulty || 'medium'
         } : {})
       }
     })

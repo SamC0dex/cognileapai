@@ -8,9 +8,13 @@ import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMe
 import { useStudyToolsStore, STUDY_TOOLS, type StudyToolType } from '@/lib/study-tools-store'
 import { StudyToolsConfirmationDialog } from './study-tools-confirmation-dialog'
 import { FlashcardCustomizationDialog } from './flashcard-customization-dialog'
+import { QuizCustomizationDialog } from './quiz-customization-dialog'
 import { FlashcardViewer } from './flashcard-viewer'
+import { QuizViewer } from './quiz-viewer'
 import { useFlashcardStore } from '@/lib/flashcard-store'
+import { useQuizStore } from '@/lib/quiz-store'
 import { FlashcardOptions, FlashcardSet } from '@/types/flashcards'
+import { QuizOptions, QuizSet } from '@/types/quiz'
 import { StudyToolContent } from '@/lib/study-tools-store'
 import {
   ChevronLeft,
@@ -31,7 +35,8 @@ import {
   X,
   Check,
   Maximize2,
-  Minimize2
+  Minimize2,
+  BrainCircuit
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FlashcardsStackIcon } from '@/components/icons/flashcards-stack-icon'
@@ -117,7 +122,8 @@ const iconMap = {
   'study-guide': BookOpen,
   'flashcards': FlashcardsStackIcon,
   'smart-notes': PenTool,
-  'smart-summary': Zap
+  'smart-summary': Zap,
+  'quiz': BrainCircuit
 }
 
 interface StudyToolCardProps {
@@ -760,6 +766,7 @@ const ExpandedPanel: React.FC<{
     lastFailedGeneration
   } = useStudyToolsStore()
   const { isViewerOpen, currentFlashcardSet, isFullscreen, closeViewer, toggleFullscreen } = useFlashcardStore()
+  const { isViewerOpen: isQuizViewerOpen, currentQuizSet, isFullscreen: isQuizFullscreen, closeViewer: closeQuizViewer, toggleFullscreen: toggleQuizFullscreen } = useQuizStore()
   const [isCopied, setIsCopied] = React.useState(false)
   const [showExportMenu, setShowExportMenu] = React.useState(false)
 
@@ -1238,6 +1245,24 @@ const ExpandedPanel: React.FC<{
               className="h-full"
             />
           </motion.div>
+        ) : isQuizViewerOpen && currentQuizSet && !isQuizFullscreen ? (
+          <motion.div
+            key="quiz"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.05 } }}
+            transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <QuizViewer
+              questions={currentQuizSet.questions}
+              title={currentQuizSet.title}
+              onClose={closeQuizViewer}
+              isFullscreen={false}
+              onToggleFullscreen={toggleQuizFullscreen}
+              className="h-full"
+            />
+          </motion.div>
         ) : (
           <motion.div
             key="tools"
@@ -1278,6 +1303,9 @@ const ExpandedPanel: React.FC<{
 
             {/* Flashcard Sets Section */}
             <FlashcardSetsSection />
+
+            {/* Quiz Sets Section */}
+            <QuizSetsSection />
 
           </motion.div>
         )}
@@ -1569,6 +1597,244 @@ const FlashcardSetsSection: React.FC = () => {
   )
 }
 
+// Quiz Sets Section Component
+const QuizSetsSection: React.FC = () => {
+  const { quizSets, openViewer, removeQuizSet, renameQuizSet } = useQuizStore()
+  const prefersReducedMotion = useReducedMotion()
+  const [editingTitle, setEditingTitle] = React.useState<string | null>(null)
+  const [editingValue, setEditingValue] = React.useState('')
+
+  const handleStartRename = (quizSet: QuizSet) => {
+    setEditingTitle(quizSet.id)
+    setEditingValue(quizSet.title)
+  }
+
+  const handleSaveRename = async (quizSetId: string) => {
+    if (editingValue.trim() && editingValue !== quizSets.find(q => q.id === quizSetId)?.title) {
+      try {
+        await renameQuizSet(quizSetId, editingValue.trim())
+      } catch (error) {
+        console.error('Failed to rename quiz set:', error)
+      }
+    }
+    setEditingTitle(null)
+    setEditingValue('')
+  }
+
+  const handleDelete = async (quizSetId: string) => {
+    try {
+      await removeQuizSet(quizSetId)
+    } catch (error) {
+      console.error('Failed to delete quiz set:', error)
+    }
+  }
+
+  if (quizSets.length === 0) {
+    return null
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.3, ...smoothTransition }}
+      className="space-y-2 mt-6 relative"
+    >
+      <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
+        <BrainCircuit size={18} className="text-rose-600 dark:text-rose-400" />
+        Generated quizzes ({quizSets.length})
+      </h3>
+
+      <motion.div
+        className="space-y-2 relative"
+        variants={{
+          hidden: {},
+          visible: {
+            transition: {
+              staggerChildren: 0.05
+            }
+          }
+        }}
+        initial="hidden"
+        animate="visible"
+      >
+        {quizSets.map((quizSet, index) => {
+          const isGenerating = quizSet.metadata?.isGenerating || false
+          const generationProgress = quizSet.metadata?.generationProgress || 0
+
+          return (
+            <motion.div
+              key={quizSet.id}
+              variants={{
+                hidden: { opacity: 0, x: -10, scale: 0.95 },
+                visible: {
+                  opacity: 1,
+                  x: 0,
+                  scale: 1,
+                  transition: {
+                    type: 'spring',
+                    stiffness: 400,
+                    damping: 25,
+                    delay: index * 0.05
+                  }
+                }
+              }}
+              className={cn(
+                "group relative p-3 rounded-lg border transition-all duration-200",
+                isGenerating
+                  ? cn("bg-rose-50/50 dark:bg-rose-900/10 border-rose-200 dark:border-rose-800")
+                  : "hover:shadow-md hover:shadow-black/5 bg-background/50 hover:bg-background/80 border-rose-200 dark:border-rose-800"
+              )}
+            >
+              <div
+                role="button"
+                tabIndex={isGenerating ? -1 : 0}
+                aria-disabled={isGenerating}
+                onClick={() => {
+                  if (!isGenerating) {
+                    openViewer(quizSet)
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (isGenerating) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    openViewer(quizSet)
+                  }
+                }}
+                className={cn(
+                  "flex items-start gap-3 w-full text-left outline-none rounded-md",
+                  "focus-visible:ring-2 focus-visible:ring-brand-teal-500/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  !isGenerating && "cursor-pointer",
+                  isGenerating && "cursor-default"
+                )}
+              >
+                {/* Quiz icon */}
+                <motion.div
+                  className={cn(
+                    "p-1.5 rounded-lg flex-shrink-0",
+                    "bg-rose-50 dark:bg-rose-900/20"
+                  )}
+                  whileHover={!prefersReducedMotion && !isGenerating ? { scale: 1.05, rotate: 1 } : undefined}
+                  animate={isGenerating ? { rotate: [0, 360] } : undefined}
+                  transition={isGenerating ? { duration: 2, repeat: Infinity, ease: "linear" } : { duration: 0.2 }}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="w-3.5 h-3.5 text-rose-700 dark:text-rose-300" />
+                  ) : (
+                    <BrainCircuit className="w-3.5 h-3.5 text-rose-700 dark:text-rose-300" />
+                  )}
+                </motion.div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    {editingTitle === quizSet.id ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          type="text"
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={() => handleSaveRename(quizSet.id)}
+                          onKeyDown={async (e) => {
+                            if (e.key === 'Enter') await handleSaveRename(quizSet.id)
+                            if (e.key === 'Escape') {
+                              setEditingTitle(null)
+                              setEditingValue('')
+                            }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          autoFocus
+                          className="flex-1 text-sm font-medium bg-background border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-teal-500/50"
+                        />
+                      </div>
+                    ) : (
+                      <h4 className="font-medium text-sm truncate flex-1">
+                        {quizSet.title}
+                      </h4>
+                    )}
+                  </div>
+
+                  {/* Quiz info */}
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {isGenerating ? (
+                      <>
+                        <span className="text-rose-700 dark:text-rose-300 font-medium">
+                          Generating...
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-rose-500 dark:bg-rose-400 transition-all duration-300 rounded-full"
+                              style={{ width: `${generationProgress}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-medium text-rose-700 dark:text-rose-300">{Math.round(generationProgress)}%</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(quizSet.createdAt).toLocaleDateString()} at {new Date(quizSet.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                        </span>
+                        <span>{quizSet.questions.length} questions</span>
+                        <span className="capitalize">
+                          {quizSet.options?.difficulty || quizSet.metadata?.avgDifficulty || 'medium'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Dropdown menu - always show so stuck generating quizzes can be deleted */}
+              <div className="absolute top-2 right-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity focus-visible:ring-0 focus-visible:ring-offset-0"
+                      type="button"
+                      aria-label="Open quiz options"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      onFocus={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="w-3 h-3 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-36">
+                    {!isGenerating && (
+                      <>
+                        <DropdownMenuItem
+                          onClick={() => handleStartRename(quizSet)}
+                          className="text-sm cursor-pointer hover:bg-accent"
+                        >
+                          <Edit3 className="w-4 h-4 mr-2" />
+                          Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    )}
+                    <DropdownMenuItem
+                      onClick={() => { void handleDelete(quizSet.id) }}
+                      className="text-sm cursor-pointer text-destructive hover:bg-destructive/10 focus:bg-destructive/10 focus:text-destructive"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </motion.div>
+          )
+        })}
+      </motion.div>
+    </motion.div>
+  )
+}
+
 // Embedded content for sidebar panel mode - full width, no panel shell or header
 const EmbeddedStudyToolsContent: React.FC<{
   onGenerateStudyTool: (type: StudyToolType) => void
@@ -1591,6 +1857,7 @@ const EmbeddedStudyToolsContent: React.FC<{
     lastFailedGeneration
   } = useStudyToolsStore()
   const { isViewerOpen, currentFlashcardSet, isFullscreen, closeViewer, toggleFullscreen } = useFlashcardStore()
+  const { isViewerOpen: isQuizViewerOpen, currentQuizSet, isFullscreen: isQuizFullscreen, closeViewer: closeQuizViewer, toggleFullscreen: toggleQuizFullscreen } = useQuizStore()
   const [isCopied, setIsCopied] = React.useState(false)
   const prefersReducedMotion = useReducedMotion()
 
@@ -1727,6 +1994,23 @@ const EmbeddedStudyToolsContent: React.FC<{
               className="h-full"
             />
           </motion.div>
+        ) : isQuizViewerOpen && currentQuizSet && !isQuizFullscreen ? (
+          <motion.div
+            key="quiz"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <QuizViewer
+              questions={currentQuizSet.questions}
+              title={currentQuizSet.title}
+              onClose={closeQuizViewer}
+              isFullscreen={false}
+              onToggleFullscreen={toggleQuizFullscreen}
+              className="h-full"
+            />
+          </motion.div>
         ) : (
           <motion.div
             key="tools"
@@ -1757,6 +2041,7 @@ const EmbeddedStudyToolsContent: React.FC<{
 
             <GeneratedDocumentsSection />
             <FlashcardSetsSection />
+            <QuizSetsSection />
 
           </motion.div>
         )}
@@ -1811,7 +2096,14 @@ const StudyToolsPanelContent: React.FC<{
     context: null
   })
 
-  // Flashcard store (placeholder for future features)
+  // Quiz customization dialog state
+  const [quizDialog, setQuizDialog] = React.useState<{
+    isOpen: boolean
+    context: 'document' | 'conversation' | null
+  }>({
+    isOpen: false,
+    context: null
+  })
 
   // Load study tools from database on mount and when context changes
   React.useEffect(() => {
@@ -1828,6 +2120,28 @@ const StudyToolsPanelContent: React.FC<{
     if (type === 'flashcards') {
       if (hasDocumentSelected) {
         setFlashcardDialog({ isOpen: true, context: 'document' })
+        return
+      }
+
+      if (hasMessages && conversationId) {
+        setConfirmationDialog({
+          isOpen: true,
+          studyToolType: type
+        })
+        return
+      }
+
+      setConfirmationDialog({
+        isOpen: true,
+        studyToolType: type
+      })
+      return
+    }
+
+    // Special handling for quiz - always show customization dialog
+    if (type === 'quiz') {
+      if (hasDocumentSelected) {
+        setQuizDialog({ isOpen: true, context: 'document' })
         return
       }
 
@@ -1888,6 +2202,18 @@ const StudyToolsPanelContent: React.FC<{
       return
     }
 
+    if (studyToolType === 'quiz') {
+      if (!conversationId) {
+        console.warn('Attempted to generate quiz from conversation without a conversationId')
+        setConfirmationDialog({ isOpen: false, studyToolType: null })
+        return
+      }
+
+      setQuizDialog({ isOpen: true, context: 'conversation' })
+      setConfirmationDialog({ isOpen: false, studyToolType: null })
+      return
+    }
+
     generateStudyTool(studyToolType, undefined, conversationId)
     setConfirmationDialog({ isOpen: false, studyToolType: null })
   }, [confirmationDialog.studyToolType, conversationId, generateStudyTool])
@@ -1933,6 +2259,32 @@ const StudyToolsPanelContent: React.FC<{
     setFlashcardDialog({ isOpen: false, context: null })
   }, [])
 
+  const handleQuizGenerate = React.useCallback((options: QuizOptions) => {
+    const context = quizDialog.context
+    setQuizDialog({ isOpen: false, context: null })
+
+    if (context === 'document') {
+      generateStudyTool('quiz', documentId, conversationId, options)
+      return
+    }
+
+    if (context === 'conversation') {
+      if (!conversationId) {
+        console.warn('Attempted to generate quiz from conversation without a conversationId')
+        return
+      }
+
+      generateStudyTool('quiz', undefined, conversationId, options)
+      return
+    }
+
+    console.warn('Quiz generation invoked without a valid context')
+  }, [quizDialog.context, generateStudyTool, documentId, conversationId])
+
+  const handleCloseQuizDialog = React.useCallback(() => {
+    setQuizDialog({ isOpen: false, context: null })
+  }, [])
+
   // Embedded mode: render content directly without panel shell (for sidebar panel)
   if (embedded) {
     return (
@@ -1961,6 +2313,14 @@ const StudyToolsPanelContent: React.FC<{
           onClose={handleCloseFlashcardDialog}
           onGenerate={handleFlashcardGenerate}
           isGenerating={isGeneratingType('flashcards')}
+        />
+
+        {/* Quiz Customization Dialog */}
+        <QuizCustomizationDialog
+          isOpen={quizDialog.isOpen}
+          onClose={handleCloseQuizDialog}
+          onGenerate={handleQuizGenerate}
+          isGenerating={isGeneratingType('quiz')}
         />
       </>
     )
@@ -2002,6 +2362,14 @@ const StudyToolsPanelContent: React.FC<{
         onClose={handleCloseFlashcardDialog}
         onGenerate={handleFlashcardGenerate}
         isGenerating={isGeneratingType('flashcards')}
+      />
+
+      {/* Quiz Customization Dialog */}
+      <QuizCustomizationDialog
+        isOpen={quizDialog.isOpen}
+        onClose={handleCloseQuizDialog}
+        onGenerate={handleQuizGenerate}
+        isGenerating={isGeneratingType('quiz')}
       />
 
     </>

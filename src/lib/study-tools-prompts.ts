@@ -1,4 +1,5 @@
 import { FLASHCARD_COUNTS } from '@/types/flashcards'
+import { QUIZ_COUNTS } from '@/types/quiz'
 
 /**
  * Comprehensive System Prompts for Study Tools Generation
@@ -357,6 +358,105 @@ Additional Context:
 - Focus: Active learning and knowledge organization
 
 Generate detailed smart notes following the systematic approach outlined. Make them valuable for both learning and long-term reference, with clear organization and rich analytical content. Start directly with the notes content - no introductory text.`
+  },
+
+  'quiz': {
+    systemPrompt: `You are an expert quiz creator specializing in generating high-quality multiple-choice questions (MCQs) that effectively test understanding across different cognitive levels. Your quizzes are designed to be educational — every question is a learning opportunity, whether the student answers correctly or not.
+
+## CRITICAL REQUIREMENTS:
+- **EXACTLY 4 OPTIONS per question** — labeled A, B, C, D
+- **EXACTLY ONE correct answer** per question
+- **Every option MUST have an explanation** — correct answers explain WHY they're right, wrong answers explain WHY they're wrong
+- **Plausible distractors** — wrong options must be realistic and test genuine understanding, not trick questions
+- **Clear, unambiguous question text** — no double negatives, no "all of the above", no "none of the above"
+
+## QUESTION DESIGN PRINCIPLES:
+
+### 1. QUESTION QUALITY
+- Each question tests a single, clear concept
+- Questions are specific and contextually grounded in the source material
+- Avoid trivial or overly obvious questions
+- Questions should require genuine understanding, not just keyword matching
+- Vary question types: definitions, cause-effect, comparisons, applications, scenarios
+
+### 2. OPTION DESIGN
+- All 4 options should be similar in length and structure
+- Correct answer position should be randomized (not always A or B)
+- Wrong options should be plausible and related to the topic
+- Avoid "trick" options that are technically correct but misleading
+- Each distractor should represent a common misconception or related concept
+
+### 3. EXPLANATION QUALITY
+- **Correct answer explanation**: Clearly explain WHY this is the right answer with supporting reasoning from the source material. Be educational and thorough (2-3 sentences).
+- **Wrong answer explanations**: Briefly explain why each wrong option is incorrect and what it actually refers to or why students might confuse it (1-2 sentences each).
+- Explanations should teach, not just state right/wrong
+
+### 4. HINT SYSTEM
+- Provide a helpful hint for each question that nudges toward the answer without giving it away
+- Hints should reference a concept or context clue from the source material
+- Good hints: "Think about the relationship between X and Y" or "Consider what happens when..."
+- Bad hints: "The answer starts with..." or "It's option C"
+
+### 5. DIFFICULTY LEVELS
+
+**Easy:**
+- Direct recall from the material
+- Definition-based questions
+- Straightforward factual questions
+- Example: "What is the primary function of X?"
+
+**Medium:**
+- Requires understanding relationships between concepts
+- Application of knowledge to scenarios
+- Comparison and contrast questions
+- Example: "Which approach best addresses the problem of X when Y is a constraint?"
+
+**Hard:**
+- Synthesis across multiple concepts
+- Evaluation and critical analysis
+- Novel scenarios requiring deep understanding
+- Example: "Given scenario X, which combination of factors would most likely lead to outcome Y?"
+
+## OUTPUT FORMAT:
+Generate a JSON array of quiz question objects with these exact fields:
+- id: unique string identifier (e.g., "q1", "q2", etc.)
+- question: clear question text (string)
+- options: array of exactly 4 option strings (DO NOT include "A. ", "B. " prefixes — just the option text)
+- correctAnswer: index of the correct option (number, 0-3)
+- explanation: detailed explanation of why the correct answer is right (string, 2-3 sentences)
+- wrongExplanations: array of exactly 4 strings — explanation for each option. For the correct answer index, provide the same explanation. For wrong options, explain why they're incorrect. (array of 4 strings)
+- hint: a helpful nudge toward the answer without giving it away (string)
+- difficulty: the difficulty level (string: "easy", "medium", or "hard")
+- topic: subject categorization from source material (string)
+
+## CRITICAL RULES:
+1. **Return ONLY the JSON array** — no introductory text, no markdown code fences
+2. **Randomize correct answer positions** — distribute across 0, 1, 2, 3 roughly equally
+3. **wrongExplanations array must have exactly 4 entries**, one per option index
+4. **Options must NOT have letter prefixes** — the UI handles labeling
+5. **Generate EXACTLY the requested number of questions**`,
+
+    userPrompt: `Generate a multiple-choice quiz based on the following content. Create educational questions with detailed explanations for both correct and incorrect answers.
+
+Source Material:
+{documentContent}
+
+## GENERATION REQUIREMENTS:
+- Document Title: {documentTitle}
+- Number of Questions: {numberOfQuestions}
+- Difficulty Level: {difficulty}
+
+## CUSTOM INSTRUCTIONS (HIGHEST PRIORITY):
+{customInstructions}
+
+**CRITICAL REMINDERS**:
+1. Each question has EXACTLY 4 options
+2. Every option needs an explanation (why right or why wrong)
+3. Include a helpful hint for each question
+4. Randomize correct answer positions across questions
+5. Follow the difficulty level precisely
+6. Generate exactly the specified number of questions
+7. Return only the JSON array — no introductory text`
   }
 } as const
 
@@ -371,6 +471,12 @@ export function getStudyToolPrompt(
   documentTitle: string,
   flashcardOptions?: {
     numberOfCards: string
+    difficulty: string
+    customInstructions?: string
+  },
+  quizOptions?: {
+    numberOfQuestions: string
+    customCount?: number
     difficulty: string
     customInstructions?: string
   }
@@ -392,6 +498,22 @@ export function getStudyToolPrompt(
       .replace('{customInstructions}', flashcardOptions.customInstructions || 'No specific instructions provided.')
   }
 
+  // Handle quiz-specific replacements
+  if (toolType === 'quiz' && quizOptions) {
+    let questionCountText: string
+    if (quizOptions.numberOfQuestions === 'custom' && quizOptions.customCount) {
+      questionCountText = `exactly ${quizOptions.customCount} questions (custom)`
+    } else {
+      const quizCount = QUIZ_COUNTS[quizOptions.numberOfQuestions as keyof typeof QUIZ_COUNTS]
+      questionCountText = `${quizCount.min}-${quizCount.max} questions (${quizOptions.numberOfQuestions})`
+    }
+
+    userPrompt = userPrompt
+      .replace('{numberOfQuestions}', questionCountText)
+      .replace('{difficulty}', quizOptions.difficulty)
+      .replace('{customInstructions}', quizOptions.customInstructions || 'No specific instructions provided.')
+  }
+
   return {
     systemPrompt: promptConfig.systemPrompt,
     userPrompt: userPrompt
@@ -406,7 +528,8 @@ export function generateStudyToolTitle(toolType: StudyToolPromptType, documentTi
     'flashcards': 'Generated flashcards',
     'study-guide': 'Study Guide',
     'smart-summary': 'Smart Summary',
-    'smart-notes': 'Smart Notes'
+    'smart-notes': 'Smart Notes',
+    'quiz': 'Quiz'
   }
 
   return `${toolNames[toolType]}: ${documentTitle}`

@@ -6,6 +6,7 @@ import { GEMINI_MODELS, GeminiModelSelector, type GeminiModelKey } from '@/lib/a
 import { TokenManager } from '@/lib/token-manager'
 import { resolveAIConfig } from '@/lib/ai-router'
 import { generateCompletionStream, type UserAIConfig } from '@/lib/ai-providers'
+import { recordUsage } from '@/lib/usage-tracker'
 
 // Service role client for background operations only
 const serviceSupabase = createClient(
@@ -338,6 +339,22 @@ export async function POST(req: NextRequest) {
                   console.error('[StatefulChat] Error saving messages:', dbErr)
                 }
               }
+
+              // Record usage for analytics (fire-and-forget)
+              // Use prompt_tokens and completion_tokens from the API for accurate billing
+              // Recompute total as input + output to avoid hidden reasoning token inflation
+              const recordedInput = apiUsage?.promptTokens ?? Math.ceil(lastMessage.content.length / 4)
+              const recordedOutput = apiUsage?.completionTokens ?? Math.ceil(fullResponse.length / 4)
+              recordUsage({
+                userId: user.id,
+                provider: configForStream.provider,
+                model: configForStream.model,
+                inputTokens: recordedInput,
+                outputTokens: recordedOutput,
+                totalTokens: recordedInput + recordedOutput,
+                source: 'chat',
+                sourceId: conversationId,
+              })
             }
           }
 

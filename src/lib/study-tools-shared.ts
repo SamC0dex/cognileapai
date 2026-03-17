@@ -1,8 +1,9 @@
 'use client'
 
 import type { FlashcardOptions } from '@/types/flashcards'
+import type { QuizOptions } from '@/types/quiz'
 
-export type StudyToolType = 'study-guide' | 'flashcards' | 'smart-notes' | 'smart-summary'
+export type StudyToolType = 'study-guide' | 'flashcards' | 'smart-notes' | 'smart-summary' | 'quiz'
 
 export interface StudyToolContent {
   id: string
@@ -26,6 +27,7 @@ export interface ActiveGeneration {
   documentId?: string
   conversationId?: string
   flashcardOptions?: FlashcardOptions
+  quizOptions?: QuizOptions
 }
 
 export interface StudyTool {
@@ -75,5 +77,14 @@ export const STUDY_TOOLS: Record<StudyToolType, StudyTool> = {
     borderColor: 'border-amber-200 dark:border-amber-800',
     textColor: 'text-amber-700 dark:text-amber-300',
     progressBarColor: 'bg-amber-500 dark:bg-amber-400'
+  },
+  quiz: {
+    name: 'Quiz',
+    description: 'Test your knowledge with MCQs',
+    icon: '🧠',
+    color: 'bg-rose-50 dark:bg-rose-900/20',
+    borderColor: 'border-rose-200 dark:border-rose-800',
+    textColor: 'text-rose-700 dark:text-rose-300',
+    progressBarColor: 'bg-rose-500 dark:bg-rose-400'
   }
 } as const

@@ -5,18 +5,20 @@ import { DashboardLayout } from '@/components/dashboard-layout'
 import { SettingsProfile } from '@/components/settings/settings-profile'
 import { SettingsApiKeys } from '@/components/settings/settings-api-keys'
 import { SettingsAIPreferences } from '@/components/settings/settings-ai-preferences'
+import { SettingsUsage } from '@/components/settings/settings-usage'
 import { useAuth } from '@/contexts/auth-context'
 import { useRouter } from 'next/navigation'
-import { User, Key, Brain, ChevronRight } from 'lucide-react'
+import { User, Key, Brain, BarChart3, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { motion } from 'framer-motion'
 
-type SettingsTab = 'profile' | 'api-keys' | 'ai-preferences'
+type SettingsTab = 'profile' | 'api-keys' | 'ai-preferences' | 'usage'
 
 const TABS: { id: SettingsTab; label: string; icon: typeof User; description: string }[] = [
   { id: 'profile', label: 'Profile', icon: User, description: 'Name, password & account' },
   { id: 'api-keys', label: 'API Keys', icon: Key, description: 'Manage provider API keys' },
   { id: 'ai-preferences', label: 'AI Model', icon: Brain, description: 'Default provider & model' },
+  { id: 'usage', label: 'Usage', icon: BarChart3, description: 'Token usage & cost analytics' },
 ]
 
 export default function SettingsPage() {
@@ -95,6 +97,7 @@ export default function SettingsPage() {
               {activeTab === 'profile' && <SettingsProfile />}
               {activeTab === 'api-keys' && <SettingsApiKeys />}
               {activeTab === 'ai-preferences' && <SettingsAIPreferences />}
+              {activeTab === 'usage' && <SettingsUsage />}
             </motion.div>
           </div>
         </div>

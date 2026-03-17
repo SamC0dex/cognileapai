@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Tokens } from 'marked'
 import type { FlashcardOptions, FlashcardSet } from '@/types/flashcards'
+import type { QuizOptions, QuizSet } from '@/types/quiz'
 import {
   STUDY_TOOLS,
   type StudyToolContent,
@@ -39,15 +40,17 @@ interface ResumeGenerationOptions {
   generationId: string
   startedAt?: number
   flashcardOptions?: FlashcardOptions
+  quizOptions?: QuizOptions
 }
 
 const isResumeOptions = (
-  options: FlashcardOptions | ResumeGenerationOptions | undefined
+  options: FlashcardOptions | QuizOptions | ResumeGenerationOptions | undefined
 ): options is ResumeGenerationOptions => {
   return Boolean(options && typeof options === 'object' && 'resume' in options && (options as ResumeGenerationOptions).resume)
 }
 
 type FlashcardStoreModule = typeof import('@/lib/flashcard-store')
+type QuizStoreModule = typeof import('@/lib/quiz-store')
 
 let cachedFlashcardStore: FlashcardStoreModule['useFlashcardStore'] | null = null
 const loadFlashcardStore = async (): Promise<FlashcardStoreModule['useFlashcardStore']> => {
@@ -55,6 +58,14 @@ const loadFlashcardStore = async (): Promise<FlashcardStoreModule['useFlashcardS
   const flashcardStoreModule = await import('@/lib/flashcard-store')
   cachedFlashcardStore = flashcardStoreModule.useFlashcardStore
   return cachedFlashcardStore
+}
+
+let cachedQuizStore: QuizStoreModule['useQuizStore'] | null = null
+const loadQuizStore = async (): Promise<QuizStoreModule['useQuizStore']> => {
+  if (cachedQuizStore) return cachedQuizStore
+  const quizStoreModule = await import('@/lib/quiz-store')
+  cachedQuizStore = quizStoreModule.useQuizStore
+  return cachedQuizStore
 }
 
 interface StudyToolsStore {
@@ -104,6 +115,7 @@ interface StudyToolsStore {
     documentId?: string
     conversationId?: string
     flashcardOptions?: FlashcardOptions
+    quizOptions?: QuizOptions
     attempt: number
   } | null
   pendingGenerations: ActiveGeneration[]
@@ -112,7 +124,7 @@ interface StudyToolsStore {
     type: StudyToolType,
     documentId?: string,
     conversationId?: string,
-    generationOptions?: FlashcardOptions | ResumeGenerationOptions
+    generationOptions?: FlashcardOptions | QuizOptions | ResumeGenerationOptions
   ) => Promise<void>
   _updateGenerationState: () => void // Internal helper
   _cleanupGenerationTracking: (generationId: string) => void
@@ -306,6 +318,16 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           } else {
             console.warn('[StudyToolsStore] Flashcard set not found:', nextItem.id)
           }
+        } else if (nextItem.type === 'quiz') {
+          const quizStore = await loadQuizStore()
+          const quizState = quizStore.getState()
+          const quizSet = quizState.quizSets.find(set => set.id === nextItem.id)
+          if (quizSet) {
+            console.log('[StudyToolsStore] Opening quiz viewer:', quizSet.title)
+            quizState.openViewer(quizSet)
+          } else {
+            console.warn('[StudyToolsStore] Quiz set not found:', nextItem.id)
+          }
         } else {
           const content = get().generatedContent.find(content => content.id === nextItem.id)
           if (content) {
@@ -413,7 +435,8 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
   retryLastGeneration: async () => {
     const last = get().lastFailedGeneration
     if (!last) return
-    await get().generateStudyTool(last.type, last.documentId, last.conversationId, last.flashcardOptions)
+    const options = last.type === 'quiz' ? last.quizOptions : last.flashcardOptions
+    await get().generateStudyTool(last.type, last.documentId, last.conversationId, options)
   },
   resumePendingGenerations: async () => {
     const pending = get().pendingGenerations
@@ -437,10 +460,11 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
     type: StudyToolType,
     documentId?: string,
     conversationId?: string,
-    generationOptions?: FlashcardOptions | ResumeGenerationOptions
+    generationOptions?: FlashcardOptions | QuizOptions | ResumeGenerationOptions
   ) => {
     const resumeOptions = isResumeOptions(generationOptions) ? generationOptions : null
-    const flashcardOptions = resumeOptions ? resumeOptions.flashcardOptions : generationOptions as FlashcardOptions | undefined
+    const flashcardOptions = resumeOptions ? resumeOptions.flashcardOptions : (type === 'flashcards' ? generationOptions as FlashcardOptions | undefined : undefined)
+    const quizOptions = resumeOptions ? resumeOptions.quizOptions : (type === 'quiz' ? generationOptions as QuizOptions | undefined : undefined)
     const generationId = resumeOptions?.generationId ?? crypto.randomUUID()
     const startTime = resumeOptions?.startedAt ?? Date.now()
     const cleanupGeneration = get()._cleanupGenerationTracking
@@ -623,7 +647,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           error: null,
           friendlyError: null,
           lastFailedGeneration: null,
-          generatedContent: type !== 'flashcards' ? nextGeneratedContent : state.generatedContent
+          generatedContent: (type !== 'flashcards' && type !== 'quiz') ? nextGeneratedContent : state.generatedContent
         }
       })
 
@@ -673,6 +697,52 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             }
           }
           flashcardStoreHook.getState().addFlashcardSet(placeholderFlashcardSet)
+        }
+      }
+
+      // For quiz, ensure placeholder exists in quiz store
+      if (type === 'quiz') {
+        const quizStoreHook = await loadQuizStore()
+        const quizStore = quizStoreHook.getState()
+        const existingSet = quizStore.quizSets.find(set => set.id === generationId)
+
+        if (existingSet) {
+          quizStoreHook.setState({
+            quizSets: quizStore.quizSets.map(set =>
+              set.id === generationId
+                ? {
+                    ...set,
+                    metadata: {
+                      ...set.metadata,
+                      isGenerating: true,
+                      generationProgress: set.metadata?.generationProgress ?? 0,
+                      statusMessage
+                    }
+                  }
+                : set
+            )
+          })
+        } else {
+          const placeholderQuizSet: QuizSet = {
+            id: placeholderContent.id,
+            title: placeholderContent.title,
+            questions: [],
+            options: quizOptions || { numberOfQuestions: 'standard', difficulty: 'medium' },
+            createdAt: placeholderContent.createdAt,
+            documentId: placeholderContent.documentId,
+            conversationId: placeholderContent.conversationId,
+            metadata: {
+              totalQuestions: 0,
+              avgDifficulty: 'generating',
+              generationTime: 0,
+              model: 'gemini-3-flash',
+              sourceContentLength: 0,
+              isGenerating: true,
+              generationProgress: placeholderContent.generationProgress ?? 0,
+              statusMessage
+            }
+          }
+          quizStoreHook.getState().addQuizSet(placeholderQuizSet)
         }
       }
 
@@ -786,6 +856,21 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
                   get().enqueueAutoOpen(flashcardSet.id, 'flashcards')
                 }
               }
+            } else if (type === 'quiz') {
+              try {
+                const quizStoreHook = await loadQuizStore()
+                const quizState = quizStoreHook.getState()
+                const quizSet = quizState.quizSets.find((set: QuizSet) => set.id === generationId)
+
+                if (!quizSet || !quizSet.metadata?.isGenerating) {
+                  cleanupGeneration(generationId)
+                  if (quizSet && !quizSet.metadata?.isGenerating) {
+                    get().enqueueAutoOpen(quizSet.id, 'quiz')
+                  }
+                }
+              } catch {
+                // Quiz store not loaded
+              }
             } else {
               const currentContent = get().generatedContent.find(content => content.id === generationId)
 
@@ -854,6 +939,13 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             { threshold: 25, message: 'Identifying main points...' },
             { threshold: 55, message: 'Creating summary...' },
             { threshold: 85, message: 'Polishing...' }
+          ],
+          'quiz': [
+            { threshold: 0, message: 'Analyzing content...' },
+            { threshold: 15, message: 'Crafting questions...' },
+            { threshold: 35, message: 'Generating answer options...' },
+            { threshold: 60, message: 'Writing explanations...' },
+            { threshold: 85, message: 'Finalizing quiz...' }
           ]
         }
 
@@ -972,6 +1064,24 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           )
           useFlashcardStoreRef.setState({ flashcardSets: updatedSets })
         }
+
+        // Also update quiz placeholder if it's a quiz generation
+        if (type === 'quiz' && cachedQuizStore) {
+          const quizState = cachedQuizStore.getState()
+          const updatedSets = quizState.quizSets.map((set: QuizSet) =>
+            set.id === placeholderContent.id
+              ? {
+                  ...set,
+                  metadata: {
+                    ...set.metadata,
+                    generationProgress: progress,
+                    statusMessage: message
+                  }
+                }
+              : set
+          )
+          cachedQuizStore.setState({ quizSets: updatedSets })
+        }
       }, 500)
 
       // Track interval for cleanup
@@ -1009,7 +1119,8 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             type,
             documentId,
             conversationId,
-            ...(type === 'flashcards' && flashcardOptions ? { flashcardOptions } : {})
+            ...(type === 'flashcards' && flashcardOptions ? { flashcardOptions } : {}),
+            ...(type === 'quiz' && quizOptions ? { quizOptions } : {})
           }),
           signal: controller.signal
         })
@@ -1064,6 +1175,14 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             const flashcardStore = flashcardStoreHook.getState()
             const updatedSets = flashcardStore.flashcardSets.filter((set: FlashcardSet) => set.id !== generationId)
             flashcardStoreHook.setState({ flashcardSets: updatedSets })
+          }
+
+          // Also remove quiz placeholder if applicable
+          if (type === 'quiz') {
+            const quizStoreHook = await loadQuizStore()
+            const quizStore = quizStoreHook.getState()
+            const updatedSets = quizStore.quizSets.filter((set: QuizSet) => set.id !== generationId)
+            quizStoreHook.setState({ quizSets: updatedSets })
           }
 
           cleanupGeneration(generationId)
@@ -1150,7 +1269,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
               const flashcardStore = useFlashcardStoreRef.getState()
               const currentFlashcardProgress = currentState.activeGenerations.get(generationId)?.progress || 0
               const flashcardCompletionMessage = currentFlashcardProgress >= 98 ? 'Complete!' : currentStatusMessage
-              
+
               const updatedSets = flashcardStore.flashcardSets.map((set: FlashcardSet) =>
                 set.id === placeholderContent.id
                   ? {
@@ -1164,6 +1283,27 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
                   : set
               )
               useFlashcardStoreRef.setState({ flashcardSets: updatedSets })
+            }
+
+            // Also update quiz placeholder if it's a quiz generation
+            if (type === 'quiz' && cachedQuizStore) {
+              const quizState = cachedQuizStore.getState()
+              const currentQuizProgress = currentState.activeGenerations.get(generationId)?.progress || 0
+              const quizCompletionMessage = currentQuizProgress >= 98 ? 'Complete!' : currentStatusMessage
+
+              const updatedSets = quizState.quizSets.map((set: QuizSet) =>
+                set.id === placeholderContent.id
+                  ? {
+                      ...set,
+                      metadata: {
+                        ...set.metadata,
+                        generationProgress: Math.min(100, currentQuizProgress + 5),
+                        statusMessage: quizCompletionMessage
+                      }
+                    }
+                  : set
+              )
+              cachedQuizStore.setState({ quizSets: updatedSets })
             }
           }, 150) // Fast completion animation
         })
@@ -1207,6 +1347,40 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
         cleanupGeneration(generationId)
 
         get().enqueueAutoOpen(flashcardSet.id, 'flashcards')
+
+      } else if (type === 'quiz' && result.questions) {
+        // Handle quiz results
+        const quizStoreHook = await loadQuizStore()
+
+        const quizSet: QuizSet = {
+          id: result.id || crypto.randomUUID(),
+          title: result.title,
+          questions: result.questions,
+          options: result.options || quizOptions || { numberOfQuestions: 'standard', difficulty: 'medium' },
+          createdAt: new Date(result.metadata?.generatedAt || new Date()),
+          documentId,
+          conversationId,
+          metadata: {
+            totalQuestions: result.questions.length,
+            avgDifficulty: result.options?.difficulty || 'medium',
+            generationTime: result.metadata?.duration || 0,
+            model: result.metadata?.model || 'gemini-3-flash',
+            sourceContentLength: result.metadata?.sourceContentLength || 0,
+            isGenerating: false,
+            generationProgress: 100,
+            statusMessage: undefined
+          }
+        }
+
+        // Replace placeholder with final quiz set in quiz store
+        const quizStore = quizStoreHook.getState()
+        const updatedSets = quizStore.quizSets.map(set =>
+          set.id === placeholderContent.id ? quizSet : set
+        )
+        quizStoreHook.setState({ quizSets: updatedSets })
+        cleanupGeneration(generationId)
+
+        get().enqueueAutoOpen(quizSet.id, 'quiz')
 
       } else {
         // Regular study tools
@@ -1280,7 +1454,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
         set(state => ({
           error: translated.userError.message,
           friendlyError: translated.userError,
-          lastFailedGeneration: { type, documentId, conversationId, attempt: 1 },
+          lastFailedGeneration: { type, documentId, conversationId, flashcardOptions, quizOptions, attempt: 1 },
           generatedContent: state.generatedContent.map(content =>
             content.id === placeholderContent.id
               ? { ...content, isGenerating: false, generationProgress: 0, statusMessage: undefined }
@@ -1404,6 +1578,18 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
         const updatedSets = flashcardStore.flashcardSets.filter((set: FlashcardSet) => set.id !== generationId)
         flashcardStoreHook.setState({ flashcardSets: updatedSets })
       }
+
+      // Also handle quiz error cleanup
+      if (type === 'quiz') {
+        try {
+          const quizStoreHook = await loadQuizStore()
+          const quizStore = quizStoreHook.getState()
+          const updatedSets = quizStore.quizSets.filter((set: QuizSet) => set.id !== generationId)
+          quizStoreHook.setState({ quizSets: updatedSets })
+        } catch (quizCleanupError) {
+          console.warn('[StudyToolsStore] Quiz cleanup error:', quizCleanupError)
+        }
+      }
     }
     // No finally block needed - cleanup is handled in try/catch
   },
@@ -1517,13 +1703,16 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
       console.log('[StudyToolsStore] Loaded study tools from database:', result)
 
       if (result.success && result.studyTools && result.studyTools.length > 0) {
-        // Separate flashcards from regular study tools
+        // Separate flashcards, quizzes from regular study tools
         const flashcards: StudyToolContent[] = []
+        const quizzes: StudyToolContent[] = []
         const regularStudyTools: StudyToolContent[] = []
 
         result.studyTools.forEach((tool: StudyToolContent) => {
           if (tool.type === 'flashcards') {
             flashcards.push(tool)
+          } else if (tool.type === 'quiz') {
+            quizzes.push(tool)
           } else {
             regularStudyTools.push(tool)
           }
@@ -1601,6 +1790,70 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           }
         }
 
+        // Handle quizzes - route to quiz store
+        if (quizzes.length > 0) {
+          try {
+            const { useQuizStore } = await import('@/lib/quiz-store')
+            useQuizStore.getState().deduplicateQuizSets()
+
+            const completedQuizIds: string[] = []
+
+            for (const quizTool of quizzes) {
+              try {
+                const cleanedContent = quizTool.content
+                  .trim()
+                  .replace(/^```json\n?/, '')
+                  .replace(/\n?```$/, '')
+                  .trim()
+
+                const parsedQuestions = JSON.parse(cleanedContent)
+
+                if (Array.isArray(parsedQuestions)) {
+                  const quizStoreState = useQuizStore.getState()
+                  const existingSet = quizStoreState.quizSets.find(set => set.id === quizTool.id)
+
+                  const quizSet: QuizSet = {
+                    id: quizTool.id,
+                    title: quizTool.title,
+                    questions: parsedQuestions,
+                    options: { numberOfQuestions: 'standard' as const, difficulty: 'medium' as const },
+                    createdAt: new Date(quizTool.createdAt),
+                    documentId: quizTool.documentId,
+                    conversationId: quizTool.conversationId,
+                    metadata: {
+                      totalQuestions: parsedQuestions.length,
+                      avgDifficulty: 'medium',
+                      generationTime: 0,
+                      model: 'gemini-3-flash',
+                      sourceContentLength: 0,
+                      isGenerating: false,
+                      generationProgress: 100,
+                      statusMessage: undefined
+                    }
+                  }
+
+                  useQuizStore.getState().addQuizSet(quizSet)
+                  if (existingSet?.metadata?.isGenerating) {
+                    completedQuizIds.push(quizTool.id)
+                  }
+                  console.log('[StudyToolsStore] Added quiz set to quiz store:', quizTool.title)
+                }
+              } catch (parseError) {
+                console.error('[StudyToolsStore] Failed to parse quiz content:', parseError)
+              }
+            }
+
+            if (completedQuizIds.length > 0) {
+              completedQuizIds.forEach(id => {
+                cleanupGeneration(id)
+                get().enqueueAutoOpen(id, 'quiz')
+              })
+            }
+          } catch (importError) {
+            console.error('[StudyToolsStore] Failed to import quiz store:', importError)
+          }
+        }
+
         // Handle regular study tools - add or update generatedContent
         if (regularStudyTools.length > 0) {
           const normalizedTools = regularStudyTools.map(tool => ({
@@ -1652,12 +1905,12 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           console.log('[StudyToolsStore] Successfully merged', normalizedTools.length, 'regular study tools from database')
         }
 
-        // Ensure flashcards are not in generatedContent (they should only be in flashcard store)
+        // Ensure flashcards and quizzes are not in generatedContent (they have their own stores)
         set(state => ({
-          generatedContent: state.generatedContent.filter(content => content.type !== 'flashcards')
+          generatedContent: state.generatedContent.filter(content => content.type !== 'flashcards' && content.type !== 'quiz')
         }))
 
-        console.log('[StudyToolsStore] Processed', flashcards.length, 'flashcards and', regularStudyTools.length, 'regular study tools')
+        console.log('[StudyToolsStore] Processed', flashcards.length, 'flashcards,', quizzes.length, 'quizzes, and', regularStudyTools.length, 'regular study tools')
       } else {
         console.log('[StudyToolsStore] No study tools found in database')
       }
