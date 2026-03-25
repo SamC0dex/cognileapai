@@ -130,7 +130,7 @@ export async function generateCompletion(
     max_tokens: options.maxTokens || 4096,
     temperature: options.temperature ?? 0.7,
     stream: false,
-  }) as Record<string, unknown>
+  }) as unknown as Record<string, unknown>
 
   // Kie.ai sometimes returns raw JSON string instead of parsed object
   if (typeof response === 'string') {

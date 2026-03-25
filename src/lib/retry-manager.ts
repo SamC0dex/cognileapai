@@ -14,7 +14,7 @@ export interface ChatTaskPayload {
 }
 
 export interface StudyToolTaskPayload {
-  type: 'study-guide' | 'smart-summary' | 'smart-notes' | 'flashcards'
+  type: 'study-guide' | 'smart-summary' | 'smart-notes' | 'flashcards' | 'quiz' | 'mind-map'
   documentId?: string
   conversationId?: string
   flashcardOptions?: Partial<FlashcardOptions>

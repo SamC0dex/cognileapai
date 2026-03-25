@@ -19,7 +19,9 @@ import {
   PenTool,
   Zap,
   X,
-  ChevronLeft
+  ChevronLeft,
+  HelpCircle,
+  Network
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -43,11 +45,13 @@ interface DashboardTabsProps {
 }
 
 // Icon mapping for study tools
-const iconMap = {
+const iconMap: Record<string, React.FC<{ className?: string }>> = {
   'study-guide': BookOpen,
   'flashcards': FlashcardsStackIcon,
   'smart-notes': PenTool,
-  'smart-summary': Zap
+  'smart-summary': Zap,
+  'quiz': HelpCircle,
+  'mind-map': Network
 }
 
 // Study Tool Card Component
@@ -430,7 +434,7 @@ export function DashboardTabs({
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           {/* Tab Navigation */}
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-            <TabsList className="grid grid-cols-3 w-full lg:w-auto bg-muted/50 p-1 h-12 min-w-0">
+            <TabsList className="grid grid-cols-4 w-full lg:w-auto bg-muted/50 p-1 h-12 min-w-0">
               {tabs.map((tab) => {
                 const Icon = tab.icon
                 return (

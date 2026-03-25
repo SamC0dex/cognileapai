@@ -1,5 +1,6 @@
 import { FLASHCARD_COUNTS } from '@/types/flashcards'
 import { QUIZ_COUNTS } from '@/types/quiz'
+import type { MindMapOptions } from '@/types/mindmap'
 
 /**
  * Comprehensive System Prompts for Study Tools Generation
@@ -457,6 +458,104 @@ Source Material:
 5. Follow the difficulty level precisely
 6. Generate exactly the specified number of questions
 7. Return only the JSON array — no introductory text`
+  },
+  'mind-map': {
+    systemPrompt: `You are an expert mind map creator specializing in generating structured, hierarchical concept maps that aid memorization and visual learning. Your goal is to create mind maps that reveal the deep structure and relationships within complex topics.
+
+## CRITICAL REQUIREMENTS:
+- **Output ONLY valid JSON** matching the exact schema below — no markdown, no code fences, no introductory text
+- **Each node must have**: id (unique string), label (3-8 words), detail (1-3 sentence explanation), optional emoji (single emoji as visual mnemonic)
+- **Respect depth strictly**: the "children" nesting must not exceed the requested depth
+- **Balance branches**: aim for roughly equal branch sizes; avoid lopsided trees
+
+## NODE DESIGN PRINCIPLES:
+
+### Labels
+- Concise, scannable phrases (3-8 words)
+- Use active or descriptive phrasing, not full sentences
+- Each label must be distinct — no near-duplicates
+
+### Details
+- 1-3 sentences expanding on the label
+- Include specific facts, definitions, or relationships
+- Written for someone who has read the source material
+
+### Emojis
+- One emoji per node that serves as a visual mnemonic
+- Choose emojis that relate to the concept, not decorative
+
+## DEPTH & NODE COUNT GUIDELINES:
+- **Depth 2**: Central → Branches → Leaves. Target 15-25 total nodes, 4-6 top-level branches.
+- **Depth 3**: Central → Branches → Sub-branches → Leaves. Target 25-50 total nodes, 4-7 top-level branches.
+- **Depth 4**: Central → Branches → Sub-branches → Sub-sub-branches → Leaves. Target 40-80 total nodes, 5-8 top-level branches.
+
+## DETAIL LEVEL:
+- **keywords**: Labels are 2-4 word keywords; details are 1 short sentence
+- **brief**: Labels are 3-6 word phrases; details are 1-2 sentences
+- **detailed**: Labels are 4-8 word descriptive phrases; details are 2-3 sentences with examples
+
+## FOCUS AREA:
+When a focus area is specified, treat it as the central topic scope. Do NOT create a general overview of the entire document — zoom in on the specified area and make that the central concept.
+
+## OUTPUT SCHEMA:
+\`\`\`json
+{
+  "title": "string — descriptive title for the mind map",
+  "centralTopic": "string — the core concept (3-8 words)",
+  "branches": [
+    {
+      "id": "b1",
+      "label": "Branch Label",
+      "detail": "Explanation of this branch.",
+      "emoji": "🔬",
+      "children": [
+        {
+          "id": "b1-1",
+          "label": "Sub-branch Label",
+          "detail": "Explanation.",
+          "emoji": "📊",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "totalNodes": 30,
+    "maxDepth": 3
+  }
+}
+\`\`\`
+
+## CRITICAL RULES:
+1. Return ONLY the JSON object — no introductory text, no code fences
+2. Every node needs a unique id (use hierarchical naming: b1, b1-1, b1-1-1, etc.)
+3. The root/central topic is NOT in the branches array — it's the "centralTopic" field
+4. Ensure JSON is valid and parseable
+5. Include metadata with accurate totalNodes count and maxDepth`,
+
+    userPrompt: `Generate a mind map based on the following content.
+
+Source Material:
+{documentContent}
+
+## GENERATION REQUIREMENTS:
+- Document Title: {documentTitle}
+- Depth: {depth} levels
+- Detail Level: {detailLevel}
+- Focus Area: {focusArea}
+
+## CUSTOM INSTRUCTIONS (HIGHEST PRIORITY):
+{customInstructions}
+
+**CRITICAL REMINDERS**:
+1. Output ONLY the JSON object — no markdown, no code fences, no explanatory text
+2. Respect the depth limit strictly (do not nest deeper than {depth} levels)
+3. Generate a balanced tree — avoid branches with only 1 child
+4. Each node needs: id, label, detail, and emoji
+5. If focus area is specified, center the map on that topic
+6. Follow the detail level precisely
+
+Generate the mind map JSON now.`
   }
 } as const
 
@@ -479,7 +578,8 @@ export function getStudyToolPrompt(
     customCount?: number
     difficulty: string
     customInstructions?: string
-  }
+  },
+  mindMapOptions?: MindMapOptions
 ) {
   const promptConfig = STUDY_TOOL_PROMPTS[toolType]
 
@@ -514,6 +614,16 @@ export function getStudyToolPrompt(
       .replace('{customInstructions}', quizOptions.customInstructions || 'No specific instructions provided.')
   }
 
+  // Handle mind-map-specific replacements
+  if (toolType === 'mind-map' && mindMapOptions) {
+    userPrompt = userPrompt
+      .replace('{depth}', String(mindMapOptions.depth))
+      .replace('{depth}', String(mindMapOptions.depth)) // second occurrence
+      .replace('{detailLevel}', mindMapOptions.detailLevel)
+      .replace('{focusArea}', mindMapOptions.focusArea || 'No specific focus — cover the main topics from the document')
+      .replace('{customInstructions}', mindMapOptions.customInstructions || 'No specific instructions provided.')
+  }
+
   return {
     systemPrompt: promptConfig.systemPrompt,
     userPrompt: userPrompt
@@ -529,7 +639,8 @@ export function generateStudyToolTitle(toolType: StudyToolPromptType, documentTi
     'study-guide': 'Study Guide',
     'smart-summary': 'Smart Summary',
     'smart-notes': 'Smart Notes',
-    'quiz': 'Quiz'
+    'quiz': 'Quiz',
+    'mind-map': 'Mind Map'
   }
 
   return `${toolNames[toolType]}: ${documentTitle}`

@@ -157,7 +157,8 @@ export async function POST(req: NextRequest) {
       // Map database types back to frontend types
       const frontendType = output.type === 'summary' ? 'smart-summary' :
                           output.type === 'notes' ? 'smart-notes' :
-                          output.type === 'study_guide' ? 'study-guide' : output.type
+                          output.type === 'study_guide' ? 'study-guide' :
+                          output.type === 'mind_map' ? 'mind-map' : output.type
 
       return {
         id: output.id, // Use database ID

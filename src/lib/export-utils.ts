@@ -369,11 +369,13 @@ function escapeHtml(text: string): string {
  * Get display name for tool type
  */
 function getToolDisplayName(type: string): string {
-  const names = {
+  const names: Record<string, string> = {
     'study-guide': 'Study Guide',
     'smart-summary': 'Smart Summary',
     'smart-notes': 'Smart Notes',
-    'flashcards': 'Flashcards'
+    'flashcards': 'Flashcards',
+    'quiz': 'Quiz',
+    'mind-map': 'Mind Map'
   }
   return names[type as keyof typeof names] || type
 }

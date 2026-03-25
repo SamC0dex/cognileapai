@@ -5,6 +5,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Tokens } from 'marked'
 import type { FlashcardOptions, FlashcardSet } from '@/types/flashcards'
 import type { QuizOptions, QuizSet } from '@/types/quiz'
+import type { MindMapOptions, MindMapSet } from '@/types/mindmap'
 import {
   STUDY_TOOLS,
   type StudyToolContent,
@@ -41,10 +42,11 @@ interface ResumeGenerationOptions {
   startedAt?: number
   flashcardOptions?: FlashcardOptions
   quizOptions?: QuizOptions
+  mindMapOptions?: MindMapOptions
 }
 
 const isResumeOptions = (
-  options: FlashcardOptions | QuizOptions | ResumeGenerationOptions | undefined
+  options: FlashcardOptions | QuizOptions | MindMapOptions | ResumeGenerationOptions | undefined
 ): options is ResumeGenerationOptions => {
   return Boolean(options && typeof options === 'object' && 'resume' in options && (options as ResumeGenerationOptions).resume)
 }
@@ -66,6 +68,16 @@ const loadQuizStore = async (): Promise<QuizStoreModule['useQuizStore']> => {
   const quizStoreModule = await import('@/lib/quiz-store')
   cachedQuizStore = quizStoreModule.useQuizStore
   return cachedQuizStore
+}
+
+type MindMapStoreModule = typeof import('@/lib/mindmap-store')
+
+let cachedMindMapStore: MindMapStoreModule['useMindMapStore'] | null = null
+const loadMindMapStore = async (): Promise<MindMapStoreModule['useMindMapStore']> => {
+  if (cachedMindMapStore) return cachedMindMapStore
+  const mindMapStoreModule = await import('@/lib/mindmap-store')
+  cachedMindMapStore = mindMapStoreModule.useMindMapStore
+  return cachedMindMapStore
 }
 
 interface StudyToolsStore {
@@ -116,6 +128,7 @@ interface StudyToolsStore {
     conversationId?: string
     flashcardOptions?: FlashcardOptions
     quizOptions?: QuizOptions
+    mindMapOptions?: MindMapOptions
     attempt: number
   } | null
   pendingGenerations: ActiveGeneration[]
@@ -124,7 +137,7 @@ interface StudyToolsStore {
     type: StudyToolType,
     documentId?: string,
     conversationId?: string,
-    generationOptions?: FlashcardOptions | QuizOptions | ResumeGenerationOptions
+    generationOptions?: FlashcardOptions | QuizOptions | MindMapOptions | ResumeGenerationOptions
   ) => Promise<void>
   _updateGenerationState: () => void // Internal helper
   _cleanupGenerationTracking: (generationId: string) => void
@@ -328,6 +341,16 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           } else {
             console.warn('[StudyToolsStore] Quiz set not found:', nextItem.id)
           }
+        } else if (nextItem.type === 'mind-map') {
+          const mindMapStore = await loadMindMapStore()
+          const mindMapState = mindMapStore.getState()
+          const mindMapSet = mindMapState.mindMapSets.find(set => set.id === nextItem.id)
+          if (mindMapSet) {
+            console.log('[StudyToolsStore] Opening mind map viewer:', mindMapSet.title)
+            mindMapState.openViewer(mindMapSet)
+          } else {
+            console.warn('[StudyToolsStore] Mind map set not found:', nextItem.id)
+          }
         } else {
           const content = get().generatedContent.find(content => content.id === nextItem.id)
           if (content) {
@@ -435,7 +458,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
   retryLastGeneration: async () => {
     const last = get().lastFailedGeneration
     if (!last) return
-    const options = last.type === 'quiz' ? last.quizOptions : last.flashcardOptions
+    const options = last.type === 'quiz' ? last.quizOptions : last.type === 'mind-map' ? last.mindMapOptions : last.flashcardOptions
     await get().generateStudyTool(last.type, last.documentId, last.conversationId, options)
   },
   resumePendingGenerations: async () => {
@@ -451,7 +474,9 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           resume: true,
           generationId: generation.id,
           startedAt: generation.startTime,
-          flashcardOptions: generation.flashcardOptions
+          flashcardOptions: generation.flashcardOptions,
+          quizOptions: generation.quizOptions,
+          mindMapOptions: generation.mindMapOptions
         }
       )
     }
@@ -460,11 +485,12 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
     type: StudyToolType,
     documentId?: string,
     conversationId?: string,
-    generationOptions?: FlashcardOptions | QuizOptions | ResumeGenerationOptions
+    generationOptions?: FlashcardOptions | QuizOptions | MindMapOptions | ResumeGenerationOptions
   ) => {
     const resumeOptions = isResumeOptions(generationOptions) ? generationOptions : null
     const flashcardOptions = resumeOptions ? resumeOptions.flashcardOptions : (type === 'flashcards' ? generationOptions as FlashcardOptions | undefined : undefined)
     const quizOptions = resumeOptions ? resumeOptions.quizOptions : (type === 'quiz' ? generationOptions as QuizOptions | undefined : undefined)
+    const mindMapOptions = resumeOptions ? resumeOptions.mindMapOptions : (type === 'mind-map' ? generationOptions as MindMapOptions | undefined : undefined)
     const generationId = resumeOptions?.generationId ?? crypto.randomUUID()
     const startTime = resumeOptions?.startedAt ?? Date.now()
     const cleanupGeneration = get()._cleanupGenerationTracking
@@ -508,7 +534,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
     try {
       const stateSnapshot = get()
 
-      const existingPlaceholder = type !== 'flashcards'
+      const existingPlaceholder = (type !== 'flashcards' && type !== 'mind-map')
         ? stateSnapshot.generatedContent.find(content => content.id === generationId)
         : undefined
 
@@ -611,6 +637,48 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           useFlashcardStoreRef.setState({ flashcardSets: updatedSets })
         }
 
+        if (type === 'quiz') {
+          try {
+            const quizStoreHook = await loadQuizStore()
+            const quizStore = quizStoreHook.getState()
+            const updatedSets = quizStore.quizSets.map((set: QuizSet) =>
+              set.id === placeholderContent.id
+                ? {
+                    ...set,
+                    metadata: {
+                      ...set.metadata,
+                      isGenerating: true,
+                      generationProgress: Math.max(set.metadata?.generationProgress ?? 0, 75),
+                      statusMessage: 'Fallback model is processing... this may take a little longer.'
+                    }
+                  }
+                : set
+            )
+            quizStoreHook.setState({ quizSets: updatedSets })
+          } catch {}
+        }
+
+        if (type === 'mind-map') {
+          try {
+            const mindMapStoreHook = await loadMindMapStore()
+            const mindMapStore = mindMapStoreHook.getState()
+            const updatedSets = mindMapStore.mindMapSets.map((set: MindMapSet) =>
+              set.id === placeholderContent.id
+                ? {
+                    ...set,
+                    metadata: {
+                      ...set.metadata,
+                      isGenerating: true,
+                      generationProgress: Math.max(set.metadata?.generationProgress ?? 0, 75),
+                      statusMessage: 'Fallback model is processing... this may take a little longer.'
+                    }
+                  }
+                : set
+            )
+            mindMapStoreHook.setState({ mindMapSets: updatedSets })
+          } catch {}
+        }
+
         if (!get().activePollIntervals.has(generationId)) {
           startStatusPolling()
         } else {
@@ -647,7 +715,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           error: null,
           friendlyError: null,
           lastFailedGeneration: null,
-          generatedContent: (type !== 'flashcards' && type !== 'quiz') ? nextGeneratedContent : state.generatedContent
+          generatedContent: (type !== 'flashcards' && type !== 'quiz' && type !== 'mind-map') ? nextGeneratedContent : state.generatedContent
         }
       })
 
@@ -743,6 +811,52 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             }
           }
           quizStoreHook.getState().addQuizSet(placeholderQuizSet)
+        }
+      }
+
+      // For mind-map, ensure placeholder exists in mind-map store
+      if (type === 'mind-map') {
+        const mindMapStoreHook = await loadMindMapStore()
+        const mindMapStore = mindMapStoreHook.getState()
+        const existingSet = mindMapStore.mindMapSets.find(set => set.id === generationId)
+
+        if (existingSet) {
+          mindMapStoreHook.setState({
+            mindMapSets: mindMapStore.mindMapSets.map(set =>
+              set.id === generationId
+                ? {
+                    ...set,
+                    metadata: {
+                      ...set.metadata,
+                      isGenerating: true,
+                      generationProgress: set.metadata?.generationProgress ?? 0,
+                      statusMessage
+                    }
+                  }
+                : set
+            )
+          })
+        } else {
+          const placeholderMindMapSet: MindMapSet = {
+            id: placeholderContent.id,
+            title: placeholderContent.title,
+            mindMapData: { title: '', centralTopic: '', branches: [] },
+            options: mindMapOptions || { depth: 3, detailLevel: 'brief', visualStyle: 'radial' },
+            createdAt: placeholderContent.createdAt,
+            documentId: placeholderContent.documentId,
+            conversationId: placeholderContent.conversationId,
+            metadata: {
+              totalNodes: 0,
+              maxDepth: 0,
+              generationTime: 0,
+              model: 'gemini-3-flash',
+              sourceContentLength: 0,
+              isGenerating: true,
+              generationProgress: placeholderContent.generationProgress ?? 0,
+              statusMessage
+            }
+          }
+          mindMapStoreHook.getState().addMindMapSet(placeholderMindMapSet)
         }
       }
 
@@ -871,6 +985,21 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
               } catch {
                 // Quiz store not loaded
               }
+            } else if (type === 'mind-map') {
+              try {
+                const mindMapStoreHook = await loadMindMapStore()
+                const mindMapState = mindMapStoreHook.getState()
+                const mindMapSet = mindMapState.mindMapSets.find((s: MindMapSet) => s.id === generationId)
+
+                if (!mindMapSet || !mindMapSet.metadata?.isGenerating) {
+                  cleanupGeneration(generationId)
+                  if (mindMapSet && !mindMapSet.metadata?.isGenerating) {
+                    get().enqueueAutoOpen(mindMapSet.id, 'mind-map')
+                  }
+                }
+              } catch {
+                // Mind map store not loaded
+              }
             } else {
               const currentContent = get().generatedContent.find(content => content.id === generationId)
 
@@ -946,6 +1075,13 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             { threshold: 35, message: 'Generating answer options...' },
             { threshold: 60, message: 'Writing explanations...' },
             { threshold: 85, message: 'Finalizing quiz...' }
+          ],
+          'mind-map': [
+            { threshold: 0, message: 'Analyzing content...' },
+            { threshold: 15, message: 'Identifying key concepts...' },
+            { threshold: 35, message: 'Building branch structure...' },
+            { threshold: 60, message: 'Adding details & connections...' },
+            { threshold: 85, message: 'Finalizing mind map...' }
           ]
         }
 
@@ -1082,6 +1218,24 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
           )
           cachedQuizStore.setState({ quizSets: updatedSets })
         }
+
+        // Also update mind-map placeholder if it's a mind-map generation
+        if (type === 'mind-map' && cachedMindMapStore) {
+          const mindMapState = cachedMindMapStore.getState()
+          const updatedSets = mindMapState.mindMapSets.map((s: MindMapSet) =>
+            s.id === placeholderContent.id
+              ? {
+                  ...s,
+                  metadata: {
+                    ...s.metadata,
+                    generationProgress: progress,
+                    statusMessage: message
+                  }
+                }
+              : s
+          )
+          cachedMindMapStore.setState({ mindMapSets: updatedSets })
+        }
       }, 500)
 
       // Track interval for cleanup
@@ -1120,7 +1274,8 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             documentId,
             conversationId,
             ...(type === 'flashcards' && flashcardOptions ? { flashcardOptions } : {}),
-            ...(type === 'quiz' && quizOptions ? { quizOptions } : {})
+            ...(type === 'quiz' && quizOptions ? { quizOptions } : {}),
+            ...(type === 'mind-map' && mindMapOptions ? { mindMapOptions } : {})
           }),
           signal: controller.signal
         })
@@ -1183,6 +1338,14 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             const quizStore = quizStoreHook.getState()
             const updatedSets = quizStore.quizSets.filter((set: QuizSet) => set.id !== generationId)
             quizStoreHook.setState({ quizSets: updatedSets })
+          }
+
+          // Also remove mind-map placeholder if applicable
+          if (type === 'mind-map') {
+            const mindMapStoreHook = await loadMindMapStore()
+            const mindMapStore = mindMapStoreHook.getState()
+            const updatedSets = mindMapStore.mindMapSets.filter((set: MindMapSet) => set.id !== generationId)
+            mindMapStoreHook.setState({ mindMapSets: updatedSets })
           }
 
           cleanupGeneration(generationId)
@@ -1381,6 +1544,40 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
         cleanupGeneration(generationId)
 
         get().enqueueAutoOpen(quizSet.id, 'quiz')
+
+      } else if (type === 'mind-map' && result.mindMapData) {
+        // Handle mind map results
+        const mindMapStoreHook = await loadMindMapStore()
+
+        const mindMapSet: MindMapSet = {
+          id: result.id || crypto.randomUUID(),
+          title: result.title,
+          mindMapData: result.mindMapData,
+          options: result.options || mindMapOptions || { depth: 3, detailLevel: 'brief', visualStyle: 'radial' },
+          createdAt: new Date(result.metadata?.generatedAt || new Date()),
+          documentId,
+          conversationId,
+          metadata: {
+            totalNodes: result.metadata?.totalNodes || result.mindMapData.metadata?.totalNodes || 0,
+            maxDepth: result.metadata?.maxDepth || result.mindMapData.metadata?.maxDepth || 3,
+            generationTime: result.metadata?.duration || 0,
+            model: result.metadata?.model || 'gemini-3-flash',
+            sourceContentLength: result.metadata?.sourceContentLength || 0,
+            isGenerating: false,
+            generationProgress: 100,
+            statusMessage: undefined
+          }
+        }
+
+        // Replace placeholder with final mind map set
+        const mindMapStore = mindMapStoreHook.getState()
+        const updatedSets = mindMapStore.mindMapSets.map(set =>
+          set.id === placeholderContent.id ? mindMapSet : set
+        )
+        mindMapStoreHook.setState({ mindMapSets: updatedSets })
+        cleanupGeneration(generationId)
+
+        get().enqueueAutoOpen(mindMapSet.id, 'mind-map')
 
       } else {
         // Regular study tools
@@ -1703,9 +1900,10 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
       console.log('[StudyToolsStore] Loaded study tools from database:', result)
 
       if (result.success && result.studyTools && result.studyTools.length > 0) {
-        // Separate flashcards, quizzes from regular study tools
+        // Separate flashcards, quizzes, mind-maps from regular study tools
         const flashcards: StudyToolContent[] = []
         const quizzes: StudyToolContent[] = []
+        const mindMaps: StudyToolContent[] = []
         const regularStudyTools: StudyToolContent[] = []
 
         result.studyTools.forEach((tool: StudyToolContent) => {
@@ -1713,6 +1911,8 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             flashcards.push(tool)
           } else if (tool.type === 'quiz') {
             quizzes.push(tool)
+          } else if (tool.type === 'mind-map') {
+            mindMaps.push(tool)
           } else {
             regularStudyTools.push(tool)
           }
@@ -1851,6 +2051,70 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             }
           } catch (importError) {
             console.error('[StudyToolsStore] Failed to import quiz store:', importError)
+          }
+        }
+
+        // Handle mind maps - route to mind-map store
+        if (mindMaps.length > 0) {
+          try {
+            const { useMindMapStore } = await import('@/lib/mindmap-store')
+            useMindMapStore.getState().deduplicateMindMapSets()
+
+            const completedMindMapIds: string[] = []
+
+            for (const mindMapTool of mindMaps) {
+              try {
+                const cleanedContent = mindMapTool.content
+                  .trim()
+                  .replace(/^```json\n?/, '')
+                  .replace(/\n?```$/, '')
+                  .trim()
+
+                const parsedData = JSON.parse(cleanedContent)
+
+                if (parsedData.centralTopic && Array.isArray(parsedData.branches)) {
+                  const mindMapStoreState = useMindMapStore.getState()
+                  const existingSet = mindMapStoreState.mindMapSets.find(set => set.id === mindMapTool.id)
+
+                  const mindMapSet: MindMapSet = {
+                    id: mindMapTool.id,
+                    title: mindMapTool.title,
+                    mindMapData: parsedData,
+                    options: { depth: 3 as const, detailLevel: 'brief' as const, visualStyle: 'radial' as const },
+                    createdAt: new Date(mindMapTool.createdAt),
+                    documentId: mindMapTool.documentId,
+                    conversationId: mindMapTool.conversationId,
+                    metadata: {
+                      totalNodes: parsedData.metadata?.totalNodes || 0,
+                      maxDepth: parsedData.metadata?.maxDepth || 3,
+                      generationTime: 0,
+                      model: 'gemini-3-flash',
+                      sourceContentLength: 0,
+                      isGenerating: false,
+                      generationProgress: 100,
+                      statusMessage: undefined
+                    }
+                  }
+
+                  useMindMapStore.getState().addMindMapSet(mindMapSet)
+                  if (existingSet?.metadata?.isGenerating) {
+                    completedMindMapIds.push(mindMapTool.id)
+                  }
+                  console.log('[StudyToolsStore] Added mind map set to mind-map store:', mindMapTool.title)
+                }
+              } catch (parseError) {
+                console.error('[StudyToolsStore] Failed to parse mind map content:', parseError)
+              }
+            }
+
+            if (completedMindMapIds.length > 0) {
+              completedMindMapIds.forEach(id => {
+                cleanupGeneration(id)
+                get().enqueueAutoOpen(id, 'mind-map')
+              })
+            }
+          } catch (importError) {
+            console.error('[StudyToolsStore] Failed to import mind-map store:', importError)
           }
         }
 
@@ -2671,7 +2935,9 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
         'smart-notes': { accent: '7C3AED', bannerFill: 'F3E8FF', description: 'Organized notes with highlights and key insights', emoji: '📝' },
         'smart-summary': { accent: 'F59E0B', bannerFill: 'FEF3C7', description: 'Concise overview with essential takeaways', emoji: '⚡' },
         'study-guide': { accent: '0F766E', bannerFill: 'D1FAE5', description: 'Comprehensive study guide with structured learning path', emoji: '📖' },
-        'flashcards': { accent: '0EA5E9', bannerFill: 'CFFAFE', description: 'Interactive flashcards — explore key questions and answers', emoji: '📚' }
+        'flashcards': { accent: '0EA5E9', bannerFill: 'CFFAFE', description: 'Interactive flashcards — explore key questions and answers', emoji: '📚' },
+        'quiz': { accent: '8B5CF6', bannerFill: 'EDE9FE', description: 'Interactive quiz to test your knowledge', emoji: '❓' },
+        'mind-map': { accent: '0D9488', bannerFill: 'CCFBF1', description: 'Visual concept map for understanding relationships', emoji: '🗺️' }
       }
 
       const theme = toolThemes[content.type] ?? toolThemes['study-guide']

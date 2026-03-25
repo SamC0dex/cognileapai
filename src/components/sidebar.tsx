@@ -14,7 +14,8 @@ import {
   Moon,
   Palette,
   LogOut,
-  Sparkles
+  Sparkles,
+  Brain
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
@@ -112,6 +113,12 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOp
       current: isStudyToolsPanelOpen,
       isPanel: true,
       panelType: 'studyTools' as const
+    },
+    {
+      name: 'Active Recall',
+      href: '/active-recall',
+      icon: Brain,
+      current: pathname === '/active-recall'
     },
     {
       name: 'My Courses',

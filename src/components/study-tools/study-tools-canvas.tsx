@@ -20,7 +20,9 @@ import {
   Zap,
   ExternalLink,
   Maximize2,
-  Minimize2
+  Minimize2,
+  HelpCircle,
+  Network
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FlashcardEntry } from '@/types/flashcards'
@@ -83,11 +85,13 @@ const contentVariants = {
   }
 }
 
-const iconMap = {
+const iconMap: Record<string, React.FC<{ className?: string }>> = {
   'study-guide': BookOpen,
   'flashcards': Sparkles,
   'smart-notes': PenTool,
-  'smart-summary': Zap
+  'smart-summary': Zap,
+  'quiz': HelpCircle,
+  'mind-map': Network
 }
 
 interface CanvasHeaderProps {

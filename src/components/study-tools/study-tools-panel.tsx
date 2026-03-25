@@ -9,12 +9,16 @@ import { useStudyToolsStore, STUDY_TOOLS, type StudyToolType } from '@/lib/study
 import { StudyToolsConfirmationDialog } from './study-tools-confirmation-dialog'
 import { FlashcardCustomizationDialog } from './flashcard-customization-dialog'
 import { QuizCustomizationDialog } from './quiz-customization-dialog'
+import { MindMapCustomizationDialog } from './mindmap-customization-dialog'
 import { FlashcardViewer } from './flashcard-viewer'
 import { QuizViewer } from './quiz-viewer'
+import { LazyMindMapViewer } from './lazy-mindmap-viewer'
 import { useFlashcardStore } from '@/lib/flashcard-store'
 import { useQuizStore } from '@/lib/quiz-store'
+import { useMindMapStore } from '@/lib/mindmap-store'
 import { FlashcardOptions, FlashcardSet } from '@/types/flashcards'
 import { QuizOptions, QuizSet } from '@/types/quiz'
+import { MindMapOptions, MindMapSet } from '@/types/mindmap'
 import { StudyToolContent } from '@/lib/study-tools-store'
 import {
   ChevronLeft,
@@ -36,7 +40,8 @@ import {
   Check,
   Maximize2,
   Minimize2,
-  BrainCircuit
+  BrainCircuit,
+  Network
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FlashcardsStackIcon } from '@/components/icons/flashcards-stack-icon'
@@ -123,7 +128,8 @@ const iconMap = {
   'flashcards': FlashcardsStackIcon,
   'smart-notes': PenTool,
   'smart-summary': Zap,
-  'quiz': BrainCircuit
+  'quiz': BrainCircuit,
+  'mind-map': Network
 }
 
 interface StudyToolCardProps {
@@ -767,6 +773,7 @@ const ExpandedPanel: React.FC<{
   } = useStudyToolsStore()
   const { isViewerOpen, currentFlashcardSet, isFullscreen, closeViewer, toggleFullscreen } = useFlashcardStore()
   const { isViewerOpen: isQuizViewerOpen, currentQuizSet, isFullscreen: isQuizFullscreen, closeViewer: closeQuizViewer, toggleFullscreen: toggleQuizFullscreen } = useQuizStore()
+  const { isViewerOpen: isMindMapViewerOpen, currentMindMapSet, isFullscreen: isMindMapFullscreen, closeViewer: closeMindMapViewer, toggleFullscreen: toggleMindMapFullscreen } = useMindMapStore()
   const [isCopied, setIsCopied] = React.useState(false)
   const [showExportMenu, setShowExportMenu] = React.useState(false)
 
@@ -1113,6 +1120,8 @@ const ExpandedPanel: React.FC<{
                     {canvasContent.type === 'smart-summary' && '⚡ Concise overview with essential takeaways'}
                     {canvasContent.type === 'study-guide' && '📖 Comprehensive study guide with structured learning path'}
                     {canvasContent.type === 'flashcards' && '📚 Interactive flashcards - Click to reveal answers'}
+                    {canvasContent.type === 'quiz' && '❓ Interactive quiz to test your knowledge'}
+                    {canvasContent.type === 'mind-map' && '🗺️ Visual concept map for understanding relationships'}
                   </p>
                 </motion.div>
 
@@ -1263,6 +1272,24 @@ const ExpandedPanel: React.FC<{
               className="h-full"
             />
           </motion.div>
+        ) : isMindMapViewerOpen && currentMindMapSet && !isMindMapFullscreen ? (
+          <motion.div
+            key="mindmap"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.05 } }}
+            transition={{ type: 'spring', stiffness: 400, damping: 40 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <LazyMindMapViewer
+              mindMapSet={currentMindMapSet}
+              title={currentMindMapSet.title}
+              onClose={closeMindMapViewer}
+              isFullscreen={false}
+              onToggleFullscreen={toggleMindMapFullscreen}
+              className="h-full"
+            />
+          </motion.div>
         ) : (
           <motion.div
             key="tools"
@@ -1306,6 +1333,9 @@ const ExpandedPanel: React.FC<{
 
             {/* Quiz Sets Section */}
             <QuizSetsSection />
+
+            {/* Mind Map Sets Section */}
+            <MindMapSetsSection />
 
           </motion.div>
         )}
@@ -1858,6 +1888,7 @@ const EmbeddedStudyToolsContent: React.FC<{
   } = useStudyToolsStore()
   const { isViewerOpen, currentFlashcardSet, isFullscreen, closeViewer, toggleFullscreen } = useFlashcardStore()
   const { isViewerOpen: isQuizViewerOpen, currentQuizSet, isFullscreen: isQuizFullscreen, closeViewer: closeQuizViewer, toggleFullscreen: toggleQuizFullscreen } = useQuizStore()
+  const { isViewerOpen: isMindMapViewerOpen, currentMindMapSet, isFullscreen: isMindMapFullscreen, closeViewer: closeMindMapViewer, toggleFullscreen: toggleMindMapFullscreen } = useMindMapStore()
   const [isCopied, setIsCopied] = React.useState(false)
   const prefersReducedMotion = useReducedMotion()
 
@@ -2011,6 +2042,23 @@ const EmbeddedStudyToolsContent: React.FC<{
               className="h-full"
             />
           </motion.div>
+        ) : isMindMapViewerOpen && currentMindMapSet && !isMindMapFullscreen ? (
+          <motion.div
+            key="mindmap"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex-1 flex flex-col min-h-0"
+          >
+            <LazyMindMapViewer
+              mindMapSet={currentMindMapSet}
+              title={currentMindMapSet.title}
+              onClose={closeMindMapViewer}
+              isFullscreen={false}
+              onToggleFullscreen={toggleMindMapFullscreen}
+              className="h-full"
+            />
+          </motion.div>
         ) : (
           <motion.div
             key="tools"
@@ -2042,11 +2090,195 @@ const EmbeddedStudyToolsContent: React.FC<{
             <GeneratedDocumentsSection />
             <FlashcardSetsSection />
             <QuizSetsSection />
+            <MindMapSetsSection />
 
           </motion.div>
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+// Mind Map Sets Section
+const MindMapSetsSection: React.FC = () => {
+  const { mindMapSets, openViewer, removeMindMapSet, renameMindMapSet } = useMindMapStore()
+  const prefersReducedMotion = useReducedMotion()
+  const [editingTitle, setEditingTitle] = React.useState<string | null>(null)
+  const [editingValue, setEditingValue] = React.useState('')
+
+  const handleStartRename = (set: MindMapSet) => {
+    setEditingTitle(set.id)
+    setEditingValue(set.title)
+  }
+
+  const handleSaveRename = async (id: string) => {
+    if (editingValue.trim()) {
+      try { await renameMindMapSet(id, editingValue.trim()) } catch { /* ignore */ }
+    }
+    setEditingTitle(null)
+    setEditingValue('')
+  }
+
+  const handleDelete = async (id: string) => {
+    try { await removeMindMapSet(id) } catch { /* ignore */ }
+  }
+
+  if (mindMapSets.length === 0) return null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.3, ...smoothTransition }}
+      className="space-y-2 mt-6 relative"
+    >
+      <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
+        <Network className="w-4 h-4 text-teal-600" />
+        Mind Maps ({mindMapSets.length})
+      </h3>
+
+      <motion.div
+        className="space-y-2 relative"
+        variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.05 } } }}
+        initial="hidden"
+        animate="visible"
+      >
+        {mindMapSets.map((set, index) => {
+          const isGenerating = set.metadata?.isGenerating || false
+          const generationProgress = set.metadata?.generationProgress || 0
+
+          return (
+            <motion.div
+              key={set.id}
+              variants={{
+                hidden: { opacity: 0, x: -10, scale: 0.95 },
+                visible: {
+                  opacity: 1, x: 0, scale: 1,
+                  transition: { type: 'spring', stiffness: 400, damping: 25, delay: index * 0.05 }
+                }
+              }}
+              className={cn(
+                "group relative p-3 rounded-lg border transition-all duration-200",
+                isGenerating
+                  ? "bg-teal-50/50 dark:bg-teal-900/10 border-teal-200 dark:border-teal-800"
+                  : "hover:shadow-md hover:shadow-black/5 bg-background/50 hover:bg-background/80 border-teal-200 dark:border-teal-800"
+              )}
+            >
+              <div
+                role="button"
+                tabIndex={isGenerating ? -1 : 0}
+                aria-disabled={isGenerating}
+                onClick={() => { if (!isGenerating) openViewer(set) }}
+                onKeyDown={(e) => {
+                  if (isGenerating) return
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openViewer(set) }
+                }}
+                className={cn(
+                  "flex items-start gap-3 w-full text-left outline-none rounded-md",
+                  "focus-visible:ring-2 focus-visible:ring-brand-teal-500/40",
+                  !isGenerating && "cursor-pointer",
+                  isGenerating && "cursor-default"
+                )}
+              >
+                <motion.div
+                  className="p-1.5 rounded-lg flex-shrink-0 bg-teal-50 dark:bg-teal-900/20"
+                  animate={isGenerating ? { rotate: [0, 360] } : undefined}
+                  transition={isGenerating ? { duration: 2, repeat: Infinity, ease: "linear" } : { duration: 0.2 }}
+                >
+                  {isGenerating ? (
+                    <Loader2 className="w-3.5 h-3.5 text-teal-700 dark:text-teal-300" />
+                  ) : (
+                    <Network className="w-3.5 h-3.5 text-teal-700 dark:text-teal-300" />
+                  )}
+                </motion.div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    {editingTitle === set.id ? (
+                      <div className="flex items-center gap-2 flex-1">
+                        <input
+                          type="text"
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={() => handleSaveRename(set.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void handleSaveRename(set.id)
+                            if (e.key === 'Escape') { setEditingTitle(null); setEditingValue('') }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          autoFocus
+                          className="flex-1 text-sm font-medium bg-background border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-brand-teal-500/50"
+                        />
+                      </div>
+                    ) : (
+                      <h4 className="font-medium text-sm truncate flex-1">{set.title}</h4>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {isGenerating ? (
+                      <>
+                        <span className="text-teal-700 dark:text-teal-300 font-medium">Generating...</span>
+                        <span className="flex items-center gap-1">
+                          <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-teal-500 dark:bg-teal-400 transition-all duration-300 rounded-full"
+                              style={{ width: `${generationProgress}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-medium text-teal-700 dark:text-teal-300">{Math.round(generationProgress)}%</span>
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {new Date(set.createdAt).toLocaleDateString()} at {new Date(set.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                        </span>
+                        <span>{set.metadata.totalNodes} nodes</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Dropdown menu */}
+              <div className="absolute top-2 right-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity focus-visible:ring-0"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreVertical className="w-3 h-3 text-muted-foreground" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-36">
+                    {!isGenerating && (
+                      <>
+                        <DropdownMenuItem onClick={() => handleStartRename(set)} className="text-sm cursor-pointer">
+                          <Edit3 className="w-4 h-4 mr-2" /> Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                      </>
+                    )}
+                    <DropdownMenuItem
+                      onClick={() => { void handleDelete(set.id) }}
+                      className="text-sm cursor-pointer text-destructive hover:bg-destructive/10"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </motion.div>
+          )
+        })}
+      </motion.div>
+    </motion.div>
   )
 }
 
@@ -2089,6 +2321,15 @@ const StudyToolsPanelContent: React.FC<{
 
   // Flashcard customization dialog state
   const [flashcardDialog, setFlashcardDialog] = React.useState<{
+    isOpen: boolean
+    context: 'document' | 'conversation' | null
+  }>({
+    isOpen: false,
+    context: null
+  })
+
+  // Mind map customization dialog state
+  const [mindMapDialog, setMindMapDialog] = React.useState<{
     isOpen: boolean
     context: 'document' | 'conversation' | null
   }>({
@@ -2160,6 +2401,28 @@ const StudyToolsPanelContent: React.FC<{
       return
     }
 
+    // Special handling for mind-map - always show customization dialog
+    if (type === 'mind-map') {
+      if (hasDocumentSelected) {
+        setMindMapDialog({ isOpen: true, context: 'document' })
+        return
+      }
+
+      if (hasMessages && conversationId) {
+        setConfirmationDialog({
+          isOpen: true,
+          studyToolType: type
+        })
+        return
+      }
+
+      setConfirmationDialog({
+        isOpen: true,
+        studyToolType: type
+      })
+      return
+    }
+
     // Regular study tools handling
     // Priority 1: If we have a document selected, generate from document
     if (hasDocumentSelected) {
@@ -2210,6 +2473,18 @@ const StudyToolsPanelContent: React.FC<{
       }
 
       setQuizDialog({ isOpen: true, context: 'conversation' })
+      setConfirmationDialog({ isOpen: false, studyToolType: null })
+      return
+    }
+
+    if (studyToolType === 'mind-map') {
+      if (!conversationId) {
+        console.warn('Attempted to generate mind map from conversation without a conversationId')
+        setConfirmationDialog({ isOpen: false, studyToolType: null })
+        return
+      }
+
+      setMindMapDialog({ isOpen: true, context: 'conversation' })
       setConfirmationDialog({ isOpen: false, studyToolType: null })
       return
     }
@@ -2285,6 +2560,31 @@ const StudyToolsPanelContent: React.FC<{
     setQuizDialog({ isOpen: false, context: null })
   }, [])
 
+  const handleMindMapGenerate = React.useCallback((options: MindMapOptions) => {
+    const context = mindMapDialog.context
+    setMindMapDialog({ isOpen: false, context: null })
+
+    if (context === 'document') {
+      generateStudyTool('mind-map', documentId, conversationId, options)
+      return
+    }
+
+    if (context === 'conversation') {
+      if (!conversationId) {
+        console.warn('Attempted to generate mind map from conversation without a conversationId')
+        return
+      }
+      generateStudyTool('mind-map', undefined, conversationId, options)
+      return
+    }
+
+    console.warn('Mind map generation invoked without a valid context')
+  }, [mindMapDialog.context, generateStudyTool, documentId, conversationId])
+
+  const handleCloseMindMapDialog = React.useCallback(() => {
+    setMindMapDialog({ isOpen: false, context: null })
+  }, [])
+
   // Embedded mode: render content directly without panel shell (for sidebar panel)
   if (embedded) {
     return (
@@ -2321,6 +2621,14 @@ const StudyToolsPanelContent: React.FC<{
           onClose={handleCloseQuizDialog}
           onGenerate={handleQuizGenerate}
           isGenerating={isGeneratingType('quiz')}
+        />
+
+        {/* Mind Map Customization Dialog */}
+        <MindMapCustomizationDialog
+          isOpen={mindMapDialog.isOpen}
+          onClose={handleCloseMindMapDialog}
+          onGenerate={handleMindMapGenerate}
+          isGenerating={isGeneratingType('mind-map')}
         />
       </>
     )
@@ -2370,6 +2678,14 @@ const StudyToolsPanelContent: React.FC<{
         onClose={handleCloseQuizDialog}
         onGenerate={handleQuizGenerate}
         isGenerating={isGeneratingType('quiz')}
+      />
+
+      {/* Mind Map Customization Dialog */}
+      <MindMapCustomizationDialog
+        isOpen={mindMapDialog.isOpen}
+        onClose={handleCloseMindMapDialog}
+        onGenerate={handleMindMapGenerate}
+        isGenerating={isGeneratingType('mind-map')}
       />
 
     </>

@@ -2,8 +2,9 @@
 
 import type { FlashcardOptions } from '@/types/flashcards'
 import type { QuizOptions } from '@/types/quiz'
+import type { MindMapOptions } from '@/types/mindmap'
 
-export type StudyToolType = 'study-guide' | 'flashcards' | 'smart-notes' | 'smart-summary' | 'quiz'
+export type StudyToolType = 'study-guide' | 'flashcards' | 'smart-notes' | 'smart-summary' | 'quiz' | 'mind-map'
 
 export interface StudyToolContent {
   id: string
@@ -28,6 +29,7 @@ export interface ActiveGeneration {
   conversationId?: string
   flashcardOptions?: FlashcardOptions
   quizOptions?: QuizOptions
+  mindMapOptions?: MindMapOptions
 }
 
 export interface StudyTool {
@@ -86,5 +88,14 @@ export const STUDY_TOOLS: Record<StudyToolType, StudyTool> = {
     borderColor: 'border-rose-200 dark:border-rose-800',
     textColor: 'text-rose-700 dark:text-rose-300',
     progressBarColor: 'bg-rose-500 dark:bg-rose-400'
+  },
+  'mind-map': {
+    name: 'Mind Map',
+    description: 'Visual concept maps for understanding',
+    icon: '🗺️',
+    color: 'bg-teal-50 dark:bg-teal-900/20',
+    borderColor: 'border-teal-200 dark:border-teal-800',
+    textColor: 'text-teal-700 dark:text-teal-300',
+    progressBarColor: 'bg-teal-500 dark:bg-teal-400'
   }
 } as const

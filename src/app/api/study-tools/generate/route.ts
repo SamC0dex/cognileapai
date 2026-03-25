@@ -77,7 +77,8 @@ const TOOL_TOKEN_ALLOCATIONS: Record<string, number> = {
   'study-guide': 32768,    // Comprehensive guides need space
   'smart-summary': 16384,  // Summaries should be more concise
   'flashcards': 8192,      // JSON arrays don't need as many tokens
-  'quiz': 16384             // Quiz JSON with explanations needs more tokens
+  'quiz': 16384,            // Quiz JSON with explanations needs more tokens
+  'mind-map': 16384         // Mind map JSON with nested nodes needs adequate tokens
 }
 
 const MODEL_HIERARCHY: ModelConfig[] = [
@@ -161,7 +162,8 @@ function isContentComplete(content: string, toolType: string): boolean {
   switch (toolType) {
     case 'flashcards':
     case 'quiz':
-      // For flashcards/quiz, check if JSON is properly closed
+    case 'mind-map':
+      // For flashcards/quiz/mind-map, check if JSON is properly closed
       try {
         JSON.parse(trimmed)
         return true
@@ -237,7 +239,7 @@ async function generateWithFallback(
           ],
           temperature: modelConfig.temperature,
           max_tokens: optimalOutputTokens,
-        }) as Record<string, unknown>
+        }) as unknown as Record<string, unknown>
 
         // Kie.ai sometimes returns raw JSON string instead of parsed object
         if (typeof response === 'string') {
@@ -368,6 +370,14 @@ interface StudyToolGenerateRequest {
     difficulty: 'easy' | 'medium' | 'hard'
     customInstructions?: string
   }
+  // Mind map-specific options
+  mindMapOptions?: {
+    depth: 2 | 3 | 4
+    detailLevel: 'keywords' | 'brief' | 'detailed'
+    focusArea?: string
+    visualStyle: 'radial' | 'tree' | 'organic'
+    customInstructions?: string
+  }
 }
 
 
@@ -384,6 +394,7 @@ export async function POST(req: NextRequest) {
   let conversationId: string | undefined
   let flashcardOptions: StudyToolGenerateRequest['flashcardOptions']
   let quizOptions: StudyToolGenerateRequest['quizOptions']
+  let mindMapOptions: StudyToolGenerateRequest['mindMapOptions']
   let generationId: string | undefined
 
   try {
@@ -407,6 +418,7 @@ export async function POST(req: NextRequest) {
     conversationId = requestData.conversationId
     flashcardOptions = requestData.flashcardOptions
     quizOptions = requestData.quizOptions
+    mindMapOptions = requestData.mindMapOptions
 
     // Debug logging
     console.log('[StudyTools] API Request received:', { type, documentId, conversationId })
@@ -418,7 +430,7 @@ export async function POST(req: NextRequest) {
     })
 
     // Validate request
-    if (!type || !['study-guide', 'smart-summary', 'smart-notes', 'flashcards', 'quiz'].includes(type)) {
+    if (!type || !['study-guide', 'smart-summary', 'smart-notes', 'flashcards', 'quiz', 'mind-map'].includes(type)) {
       return NextResponse.json(
         { error: 'Invalid study tool type' },
         { status: 400 }
@@ -579,6 +591,13 @@ export async function POST(req: NextRequest) {
         customCount: quizOptions.customCount,
         difficulty: quizOptions.difficulty,
         customInstructions: quizOptions.customInstructions
+      } : undefined,
+      mindMapOptions ? {
+        depth: mindMapOptions.depth,
+        detailLevel: mindMapOptions.detailLevel,
+        focusArea: mindMapOptions.focusArea,
+        visualStyle: mindMapOptions.visualStyle,
+        customInstructions: mindMapOptions.customInstructions
       } : undefined
     )
 
@@ -653,6 +672,7 @@ export async function POST(req: NextRequest) {
     let processedContent: string = resultText
     let flashcardData = null
     let quizData = null
+    let mindMapData = null
 
     if (type === 'flashcards') {
       try {
@@ -725,6 +745,44 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Special handling for mind-map - parse JSON response
+    if (type === 'mind-map') {
+      try {
+        const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
+        mindMapData = JSON.parse(cleanedText)
+
+        if (!mindMapData.centralTopic || !Array.isArray(mindMapData.branches)) {
+          throw new Error('Mind map data missing required fields: centralTopic and branches')
+        }
+
+        // Count total nodes
+        const countNodes = (nodes: Array<{ children?: unknown[] }>): number => {
+          let count = nodes.length
+          for (const node of nodes) {
+            if (Array.isArray(node.children)) {
+              count += countNodes(node.children as Array<{ children?: unknown[] }>)
+            }
+          }
+          return count
+        }
+        const totalNodes = countNodes(mindMapData.branches) + 1 // +1 for central node
+
+        // Ensure metadata exists
+        if (!mindMapData.metadata) {
+          mindMapData.metadata = { totalNodes, maxDepth: mindMapOptions?.depth || 3 }
+        }
+
+        console.log(`[StudyTools] Successfully parsed mind map with ${totalNodes} nodes`)
+        processedContent = resultText
+      } catch (error) {
+        console.error('[StudyTools] Failed to parse mind map JSON:', error)
+        return NextResponse.json(
+          { error: 'Failed to parse generated mind map. The AI response was not in the expected format.' },
+          { status: 500 }
+        )
+      }
+    }
+
     // Generate appropriate title
     const generatedTitle = generateStudyToolTitle(type as StudyToolPromptType, documentTitle)
 
@@ -733,7 +791,8 @@ export async function POST(req: NextRequest) {
                    type === 'smart-notes' ? 'notes' :
                    type === 'study-guide' ? 'study_guide' :
                    type === 'flashcards' ? 'flashcards' :
-                   type === 'quiz' ? 'quiz' : type
+                   type === 'quiz' ? 'quiz' :
+                   type === 'mind-map' ? 'mind_map' : type
 
     let outputId: string | null = null
 
@@ -804,6 +863,20 @@ export async function POST(req: NextRequest) {
                 sourceContentLength: documentContent.length,
                 totalQuestions: quizData.length,
                 avgDifficulty: quizOptions?.difficulty || 'medium',
+                fallbackStrategy: modelUsed.includes('flash') ? 'applied' : 'none'
+              }
+            }
+          : type === 'mind-map' && mindMapData
+          ? {
+              mindMapData,
+              options: mindMapOptions,
+              metadata: {
+                model: modelUsed,
+                duration: generationDuration,
+                contentLength: processedContent.length,
+                sourceContentLength: documentContent.length,
+                totalNodes: mindMapData.metadata?.totalNodes || 0,
+                maxDepth: mindMapData.metadata?.maxDepth || 3,
                 fallbackStrategy: modelUsed.includes('flash') ? 'applied' : 'none'
               }
             }
@@ -937,6 +1010,11 @@ export async function POST(req: NextRequest) {
         questions: quizData,
         options: quizOptions
       } : {}),
+      // Include mind-map-specific data in response
+      ...(type === 'mind-map' && mindMapData ? {
+        mindMapData,
+        options: mindMapOptions
+      } : {}),
       metadata: {
         generatedAt: new Date().toISOString(),
         model: modelUsed,
@@ -951,6 +1029,10 @@ export async function POST(req: NextRequest) {
         ...(type === 'quiz' && quizData ? {
           totalQuestions: quizData.length,
           avgDifficulty: quizOptions?.difficulty || 'medium'
+        } : {}),
+        ...(type === 'mind-map' && mindMapData ? {
+          totalNodes: mindMapData.metadata?.totalNodes || 0,
+          maxDepth: mindMapData.metadata?.maxDepth || 3
         } : {})
       }
     })
@@ -987,14 +1069,14 @@ export async function POST(req: NextRequest) {
     const reason = errorClassification.reason || 'unknown error'
 
     // Prepare retry payload for background processing (only if we have type assigned)
-    const retryPayload = type ? {
+    const retryPayload: import('@/lib/retry-manager').RetryPayload = type ? {
       type,
       documentId,
       conversationId,
       flashcardOptions,
       timestamp: Date.now(),
       requestId: crypto.randomUUID()
-    } : {
+    } as import('@/lib/retry-manager').StudyToolTaskPayload : {
       error: 'Invalid request structure',
       timestamp: Date.now(),
       requestId: crypto.randomUUID()

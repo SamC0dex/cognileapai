@@ -6,6 +6,7 @@ import { Toaster } from 'sonner'
 import { AppWrapper } from '@/components/app-wrapper'
 import { ErrorManagementProvider } from '@/components/error-management/provider'
 import { AuthProvider } from '@/contexts/auth-context'
+import { ServiceWorkerRegister } from '@/components/active-recall/service-worker-register'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -42,6 +43,7 @@ export default function RootLayout({
               >
                 {children}
                 <Toaster richColors closeButton position="top-right" />
+                <ServiceWorkerRegister />
               </ThemeProvider>
             </ErrorManagementProvider>
           </AuthProvider>

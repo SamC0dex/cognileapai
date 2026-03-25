@@ -445,7 +445,8 @@ export const QuizViewer: React.FC<QuizViewerProps> = ({
 
               let optionState: 'default' | 'selected' | 'correct' | 'wrong' | 'correctReveal' = 'default'
               if (isAnswered) {
-                if (isCorrectOption) optionState = 'correct'
+                if (isCorrectOption && currentAnswer.isCorrect) optionState = 'correct'
+                else if (isCorrectOption && !currentAnswer.isCorrect) optionState = 'correctReveal'
                 else if (wasSelectedWrong) optionState = 'wrong'
                 else optionState = 'default'
               } else if (isSelected) {

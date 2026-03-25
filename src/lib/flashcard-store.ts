@@ -231,6 +231,14 @@ export const useFlashcardStore = create<FlashcardStore>()(
             return { flashcardSets: [flashcardSet, ...state.flashcardSets] }
           }
         })
+
+        // Auto-sync to ActiveRecall (fire-and-forget)
+        if (!flashcardSet.metadata?.isGenerating && flashcardSet.cards.length > 0) {
+          import('@/lib/active-recall-sync').then(({ buildFlashcardSyncPayload, syncToActiveRecall }) => {
+            const payload = buildFlashcardSyncPayload(flashcardSet)
+            syncToActiveRecall(payload)
+          }).catch(err => console.warn('[FlashcardStore] ActiveRecall sync skipped:', err))
+        }
       },
 
       removeFlashcardSet: async (id: string) => {
