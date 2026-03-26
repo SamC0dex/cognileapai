@@ -131,6 +131,7 @@ export const useActiveRecallStore = create<ActiveRecallStore>()(
               showAnswer: false,
               ratings: [],
               startedAt: new Date(),
+              cardRevealedAt: null,
             },
             error: null,
           })
@@ -143,10 +144,13 @@ export const useActiveRecallStore = create<ActiveRecallStore>()(
       flipCard: () => {
         set((state) => {
           if (!state.currentSession) return state
+          const isRevealing = !state.currentSession.showAnswer
           return {
             currentSession: {
               ...state.currentSession,
-              showAnswer: !state.currentSession.showAnswer,
+              showAnswer: isRevealing,
+              // Track when the answer was revealed for per-card response time
+              cardRevealedAt: isRevealing ? new Date() : state.currentSession.cardRevealedAt,
             },
           }
         })
@@ -159,9 +163,10 @@ export const useActiveRecallStore = create<ActiveRecallStore>()(
         const card = currentSession.cards[currentSession.currentCardIndex]
         if (!card) return
 
-        const startTime = Date.now()
-        // Use time since card was shown (approximate)
-        const responseTimeMs = Math.max(1000, startTime - currentSession.startedAt.getTime())
+        // Per-card response time: time between answer reveal and rating
+        const now = Date.now()
+        const revealTime = currentSession.cardRevealedAt?.getTime() ?? now - 2000
+        const responseTimeMs = Math.max(500, now - revealTime)
 
         try {
           const response = await fetch('/api/active-recall/review', {
@@ -202,6 +207,7 @@ export const useActiveRecallStore = create<ActiveRecallStore>()(
                   ? state.currentSession.currentCardIndex
                   : state.currentSession.currentCardIndex + 1,
                 showAnswer: false,
+                cardRevealedAt: null, // Reset for next card
               },
             }
           })
@@ -222,6 +228,7 @@ export const useActiveRecallStore = create<ActiveRecallStore>()(
               ...state.currentSession,
               currentCardIndex: nextIndex,
               showAnswer: false,
+              cardRevealedAt: null,
             },
           }
         })

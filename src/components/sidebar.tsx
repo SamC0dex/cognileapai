@@ -118,7 +118,7 @@ export function Sidebar({ isCollapsed = false, onCollapsedChange, isFilesPanelOp
       name: 'Active Recall',
       href: '/active-recall',
       icon: Brain,
-      current: pathname === '/active-recall'
+      current: pathname?.startsWith('/active-recall') || false
     },
     {
       name: 'My Courses',

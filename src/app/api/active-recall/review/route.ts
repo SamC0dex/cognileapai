@@ -114,8 +114,18 @@ export async function POST(req: NextRequest) {
         .eq('user_id', user.id)
     }
 
-    // Update user streaks
-    const today = new Date().toISOString().split('T')[0]
+    // Update user streaks — use user's timezone for date calculation
+    let userTimezone = 'UTC'
+    const { data: notifPrefs } = await supabase
+      .from('notification_preferences')
+      .select('timezone')
+      .eq('user_id', user.id)
+      .single()
+    if (notifPrefs?.timezone) {
+      userTimezone = notifPrefs.timezone
+    }
+
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: userTimezone }) // YYYY-MM-DD
     const { data: streak } = await supabase
       .from('user_streaks')
       .select('*')
@@ -129,9 +139,12 @@ export async function POST(req: NextRequest) {
       if (lastReview === today) {
         // Same day, don't change streak
       } else if (lastReview) {
-        const lastDate = new Date(lastReview)
-        const todayDate = new Date(today)
-        const diffDays = Math.floor((todayDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24))
+        // Compare dates as strings (YYYY-MM-DD) for timezone-safe day diff
+        const lastParts = lastReview.split('-').map(Number)
+        const todayParts = today.split('-').map(Number)
+        const lastMs = Date.UTC(lastParts[0], lastParts[1] - 1, lastParts[2])
+        const todayMs = Date.UTC(todayParts[0], todayParts[1] - 1, todayParts[2])
+        const diffDays = Math.round((todayMs - lastMs) / (1000 * 60 * 60 * 24))
         newReviewStreak = diffDays === 1 ? newReviewStreak + 1 : 1
       } else {
         newReviewStreak = 1
@@ -161,6 +174,20 @@ export async function POST(req: NextRequest) {
           longest_streak: 1,
           last_study_date: today,
         })
+    }
+
+    // Trigger AI interval adjustment every 50 reviews (fire-and-forget)
+    const totalReviewed = streak
+      ? (streak.total_cards_reviewed || 0) + 1
+      : 1
+    if (totalReviewed % 50 === 0) {
+      fetch(new URL('/api/active-recall/adjust-intervals', req.url), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          cookie: req.headers.get('cookie') || '',
+        },
+      }).catch(() => {})
     }
 
     const response: ReviewResponse = {

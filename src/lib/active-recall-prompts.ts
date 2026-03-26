@@ -153,3 +153,118 @@ Return ONLY the JSON array, no other text.`
     { role: 'user', content: `Per-topic performance data:\n${topicData}` },
   ]
 }
+
+// ============================================
+// V2 — AI Chat Sidebar Prompt
+// ============================================
+
+export interface AIChatContext {
+  totalCards: number
+  dueCards: number
+  overdueCount: number
+  masteryPct: number
+  currentStreak: number
+  longestStreak: number
+  weakTopics: string[]
+  strongTopics: string[]
+  recentAccuracy: number
+  totalReviews: number
+  upcomingExams: { title: string; daysUntil: number; readiness?: number }[]
+  recentSessionSummary: string | null
+}
+
+export function buildAIChatSystemPrompt(ctx: AIChatContext): string {
+  return `You are the student's personal AI study coach inside CogniLeap — a spaced repetition learning app. You have deep knowledge of their learning data and you genuinely care about their academic success.
+
+Your personality:
+- Warm, knowledgeable, and direct — like a great tutor who knows the student well
+- You give specific, actionable advice based on their actual data — never generic platitudes
+- You're honest about weak areas but always constructive
+- Keep responses concise (2-5 sentences for simple questions, longer for study plans)
+- Use markdown formatting when helpful (bold for emphasis, lists for plans)
+
+The student's current learning data:
+- Total cards: ${ctx.totalCards} | Due now: ${ctx.dueCards} (${ctx.overdueCount} overdue)
+- Overall mastery: ${ctx.masteryPct}%
+- Current streak: ${ctx.currentStreak} days (longest: ${ctx.longestStreak})
+- Recent accuracy: ${ctx.recentAccuracy}%
+- Total lifetime reviews: ${ctx.totalReviews}
+- Weak topics (need work): ${ctx.weakTopics.length > 0 ? ctx.weakTopics.join(', ') : 'None identified'}
+- Strong topics: ${ctx.strongTopics.length > 0 ? ctx.strongTopics.join(', ') : 'None yet'}
+${ctx.upcomingExams.length > 0 ? `- Upcoming exams: ${ctx.upcomingExams.map(e => `${e.title} in ${e.daysUntil} days${e.readiness ? ` (${e.readiness}% ready)` : ''}`).join('; ')}` : '- No upcoming exams scheduled'}
+${ctx.recentSessionSummary ? `- Last session: ${ctx.recentSessionSummary}` : '- No recent sessions'}
+
+You can help with:
+- "Am I ready for my exam?" — assess readiness based on mastery + weak topics
+- "What should I study today?" — prioritize based on due cards, weak areas, exams
+- "Why do I keep getting X wrong?" — analyze patterns in their weak topics
+- "Make me a study plan" — create day-by-day plans based on their data
+- General study tips, motivation, or learning strategy questions
+
+Always ground your answers in their actual data. If you don't have enough data to answer precisely, say so.`
+}
+
+export function buildStudyPlanPrompt(
+  examTitle: string,
+  examDate: string,
+  daysUntil: number,
+  totalCards: number,
+  weakTopics: string[],
+  strongTopics: string[],
+  masteryPct: number
+): ChatMessage[] {
+  const system = `You are a study planning AI. Create a day-by-day study plan for an upcoming exam.
+
+Output a JSON array of daily plans:
+[{ "day": 1, "date": "YYYY-MM-DD", "focus": "topic name", "cards": number, "notes": "brief tip" }]
+
+Rules:
+- Distribute cards evenly but front-load weak topics
+- If exam is within 3 days, enter cram mode (more cards per day, shorter intervals)
+- Include rest days if exam is more than 2 weeks away
+- Max 50 cards per day (30 recommended for normal pace)
+- Be specific about which topics to focus on each day
+- Keep notes brief (1 sentence)
+- Return ONLY valid JSON, no other text`
+
+  const user = `Plan a study schedule:
+- Exam: ${examTitle}
+- Exam date: ${examDate} (${daysUntil} days away)
+- Total flashcards/quiz cards: ${totalCards}
+- Current mastery: ${masteryPct}%
+- Weak topics (need more work): ${weakTopics.join(', ') || 'none identified'}
+- Strong topics: ${strongTopics.join(', ') || 'none identified'}
+
+Generate the study plan as JSON.`
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ]
+}
+
+export function buildCardExplanationPrompt(
+  question: string,
+  answer: string,
+  userAttempt?: string
+): ChatMessage[] {
+  const system = `You are a patient teacher explaining a concept. A student is reviewing a flashcard and wants to understand WHY the answer is correct.
+
+Rules:
+- Explain the core concept, not just restate the answer
+- If the student got it wrong, explain why their attempt was incorrect without being condescending
+- Use analogies or examples when helpful
+- Keep it concise (3-5 sentences)
+- If applicable, give a memory trick or mnemonic`
+
+  let userContent = `Question: ${question}\nCorrect answer: ${answer}`
+  if (userAttempt) {
+    userContent += `\nStudent's attempt: ${userAttempt}`
+  }
+  userContent += '\n\nExplain why this is the correct answer.'
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: userContent },
+  ]
+}

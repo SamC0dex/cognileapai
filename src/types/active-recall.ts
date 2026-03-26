@@ -301,6 +301,7 @@ export interface ActiveRecallStoreState {
     showAnswer: boolean
     ratings: ReviewSessionResult[]
     startedAt: Date
+    cardRevealedAt: Date | null
   } | null
 
   // Stats cache
@@ -334,3 +335,131 @@ export interface ActiveRecallStoreActions {
 }
 
 export type ActiveRecallStore = ActiveRecallStoreState & ActiveRecallStoreActions
+
+// ============================================
+// V2 Types — Review Session, Exam Prep, Preferences
+// ============================================
+
+export interface ReviewSessionConfig {
+  documentIds?: string[]
+  topics?: string[]
+  cardCount: number
+  mode: 'flashcard' | 'quiz' | 'mixed'
+  includeNew: boolean
+  orderStrategy: 'optimal' | 'random' | 'newest'
+}
+
+export interface ReviewSessionState {
+  id: string
+  config: ReviewSessionConfig
+  cards: ReviewCard[]
+  currentCardIndex: number
+  showAnswer: boolean
+  ratings: ReviewSessionResult[]
+  undoStack: ReviewUndoEntry[]
+  startedAt: Date
+  cardRevealedAt: Date | null
+}
+
+export interface ReviewUndoEntry {
+  cardIndex: number
+  previousRating: ReviewSessionResult
+  previousCardState: {
+    ease_factor: number
+    interval_days: number
+    repetitions: number
+    recall_layer: RecallLayer
+    next_review_at: string
+    consecutive_correct: number
+  }
+}
+
+export interface ExamReadiness {
+  examId: string
+  examTitle: string
+  examDate: string
+  daysUntil: number
+  overallReadiness: number
+  topicReadiness: Record<string, number>
+  dailyTarget: number
+  behindTopics: string[]
+  linkedDocumentIds: string[]
+  linkedTopics: string[]
+}
+
+export interface DailyGoal {
+  target: number
+  completed: number
+  date: string
+  streakDays: number
+  streakFreezeAvailable: boolean
+}
+
+export interface ReviewPreferences {
+  defaultCardCount: number
+  defaultMode: 'flashcard' | 'quiz' | 'mixed'
+  autoAdvance: boolean
+  showIntervalPreviews: boolean
+  cardOrder: 'optimal' | 'random' | 'newest'
+  enableSwipeGestures: boolean
+}
+
+export interface StudyPlan {
+  id: string
+  userId: string
+  examId: string
+  days: StudyPlanDay[]
+  totalCards: number
+  estimatedHours: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface StudyPlanDay {
+  date: string
+  targetCards: number
+  completedCards: number
+  topics: string[]
+  isCramMode: boolean
+}
+
+export interface AICardExplanation {
+  id: string
+  cardId: string
+  userId: string
+  explanation: string
+  createdAt: string
+}
+
+export interface SessionFeedback {
+  summary: string
+  accuracy: number
+  avgResponseTimeMs: number
+  layerPromotions: number
+  layerDemotions: number
+  strengths: string[]
+  weaknesses: string[]
+  aiCoachingMessage: string
+  streakUpdate: { current: number; isNew: boolean } | null
+  dailyGoalProgress: { completed: number; target: number } | null
+}
+
+export interface AIChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+}
+
+export interface LearningContext {
+  totalCards: number
+  dueCards: number
+  masteryPct: number
+  currentStreak: number
+  weakTopics: string[]
+  strongTopics: string[]
+  recentAccuracy: number
+  upcomingExams: { title: string; daysUntil: number }[]
+  dailyGoal: DailyGoal | null
+}
