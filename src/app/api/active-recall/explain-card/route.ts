@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { routedCompletion } from '@/lib/ai-router'
+import { recordUsage } from '@/lib/usage-tracker'
 import { buildCardExplanationPrompt } from '@/lib/active-recall-prompts'
 
 export async function POST(req: NextRequest) {
@@ -33,11 +34,15 @@ export async function POST(req: NextRequest) {
     // Generate explanation
     const messages = buildCardExplanationPrompt(question, answer, userAttempt)
 
-    const { text } = await routedCompletion(user.id, {
+    const { text, config, usage } = await routedCompletion(user.id, {
       messages,
       maxTokens: 500,
       temperature: 0.7,
     })
+
+    if (usage) {
+      recordUsage({ userId: user.id, provider: config.provider, model: config.model, inputTokens: usage.promptTokens, outputTokens: usage.completionTokens, totalTokens: usage.totalTokens, source: 'active-recall', sourceId: cardId })
+    }
 
     const explanation = text.trim()
 

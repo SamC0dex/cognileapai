@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { routedCompletion } from '@/lib/ai-router'
+import { recordUsage } from '@/lib/usage-tracker'
 import { buildIntervalAdjustPrompt } from '@/lib/active-recall-prompts'
 
 export async function POST(req: NextRequest) {
@@ -78,11 +79,15 @@ export async function POST(req: NextRequest) {
     // Call AI for interval multiplier recommendations
     const messages = buildIntervalAdjustPrompt({ topics })
 
-    const { text } = await routedCompletion(user.id, {
+    const { text, config, usage } = await routedCompletion(user.id, {
       messages,
       maxTokens: 1000,
       temperature: 0.3,
     })
+
+    if (usage) {
+      recordUsage({ userId: user.id, provider: config.provider, model: config.model, inputTokens: usage.promptTokens, outputTokens: usage.completionTokens, totalTokens: usage.totalTokens, source: 'active-recall' })
+    }
 
     // Parse AI response
     let adjustments: Array<{ topic: string; multiplier: number; reasoning: string }> = []

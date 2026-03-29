@@ -302,6 +302,22 @@ export const useActiveRecallStore = create<ActiveRecallStore>()(
         }
       },
 
+      syncFromMindMap: async (mindMapSetId: string, documentId?: string) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { useMindMapStore } = require('@/lib/mindmap-store')
+          const mindMapStore = useMindMapStore.getState()
+          const mindMapSet = mindMapStore.getMindMapSetById(mindMapSetId)
+          if (!mindMapSet) return
+
+          const { buildMindMapSyncPayloadFromSet, syncToActiveRecall } = await import('@/lib/active-recall-sync')
+          const payload = buildMindMapSyncPayloadFromSet(mindMapSet)
+          await syncToActiveRecall(payload)
+        } catch (error) {
+          console.warn('[ActiveRecall] Sync from mind map error:', error)
+        }
+      },
+
       // ============================================
       // Reset
       // ============================================

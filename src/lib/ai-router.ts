@@ -4,7 +4,7 @@
  * Checks user preferences first, falls back to server-side Kie.ai config.
  */
 
-import { getUserAIConfig, generateCompletion, generateCompletionStream, type UserAIConfig, type ChatMessage, type GenerateOptions, type StreamChunk } from './ai-providers'
+import { getUserAIConfig, generateCompletion, generateCompletionStream, type UserAIConfig, type ChatMessage, type GenerateOptions, type StreamChunk, type TokenUsage } from './ai-providers'
 import OpenAI from 'openai'
 import { createClient } from '@supabase/supabase-js'
 
@@ -92,12 +92,12 @@ function createKieClient(apiKey: string, model: string): OpenAI {
 export async function routedCompletion(
   userId: string,
   options: GenerateOptions
-): Promise<{ text: string; config: ResolvedAIConfig }> {
+): Promise<{ text: string; config: ResolvedAIConfig; usage: TokenUsage | null }> {
   const config = await resolveAIConfig(userId)
 
   if (config.userConfig) {
     const result = await generateCompletion(config.userConfig, options)
-    return { text: result.text, config }
+    return { text: result.text, config, usage: result.usage }
   }
 
   // Server fallback — should not normally reach here since resolveAIConfig
@@ -118,7 +118,16 @@ export async function routedCompletion(
     temperature: options.temperature ?? 0.7,
   })
 
-  return { text: response.choices[0]?.message?.content || '', config }
+  const usage = response.usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined
+  return {
+    text: response.choices[0]?.message?.content || '',
+    config,
+    usage: usage ? {
+      promptTokens: usage.prompt_tokens ?? 0,
+      completionTokens: usage.completion_tokens ?? 0,
+      totalTokens: usage.total_tokens ?? 0,
+    } : null,
+  }
 }
 
 /**

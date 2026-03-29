@@ -1,6 +1,8 @@
 import type { SyncRequest, SyncCardPayload } from '@/types/active-recall'
 import type { FlashcardSet } from '@/types/flashcards'
 import type { QuizSet } from '@/types/quiz'
+import type { MindMapSet } from '@/types/mindmap'
+import { buildMindMapSyncPayload } from '@/lib/active-recall-mindmap-sync'
 
 /**
  * Build a sync request payload from a FlashcardSet.
@@ -43,6 +45,14 @@ export function buildQuizSyncPayload(set: QuizSet): SyncRequest {
     documentId: set.documentId,
     cards,
   }
+}
+
+/**
+ * Build a sync request payload from a MindMapSet.
+ * Generates branch recall, node completion, and detail recall cards.
+ */
+export function buildMindMapSyncPayloadFromSet(set: MindMapSet): SyncRequest {
+  return buildMindMapSyncPayload(set.id, set.mindMapData, set.documentId)
 }
 
 /**

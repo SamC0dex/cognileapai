@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { DashboardLayout } from '@/components/dashboard-layout'
 import { ARTabNav } from '@/components/active-recall/v2/ar-tab-nav'
 import { AIChatSidebar } from '@/components/active-recall/v2/ai-chat-sidebar'
@@ -13,6 +13,16 @@ export default function ActiveRecallLayout({
 }) {
   const [isChatOpen, setIsChatOpen] = useState(false)
 
+  // Listen for custom event to open chat from child components
+  const handleOpenChat = useCallback(() => {
+    setIsChatOpen(true)
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('open-study-agent', handleOpenChat)
+    return () => window.removeEventListener('open-study-agent', handleOpenChat)
+  }, [handleOpenChat])
+
   return (
     <DashboardLayout>
       <div className="flex flex-col h-full min-h-screen">
@@ -23,7 +33,7 @@ export default function ActiveRecallLayout({
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Active Recall</h1>
-            <p className="text-sm text-muted-foreground">Your AI-powered learning companion</p>
+            <p className="text-sm text-muted-foreground">AI-powered multi-tool learning</p>
           </div>
         </div>
 

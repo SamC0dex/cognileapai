@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { routedCompletion } from '@/lib/ai-router'
+import { recordUsage } from '@/lib/usage-tracker'
 import { buildNudgePrompt } from '@/lib/active-recall-prompts'
 import { RecallLayer } from '@/types/active-recall'
 
@@ -99,11 +100,15 @@ export async function GET(req: NextRequest) {
     })
 
     // Generate nudge
-    const { text } = await routedCompletion(user.id, {
+    const { text, config, usage } = await routedCompletion(user.id, {
       messages,
       maxTokens: 200,
       temperature: 0.8,
     })
+
+    if (usage) {
+      recordUsage({ userId: user.id, provider: config.provider, model: config.model, inputTokens: usage.promptTokens, outputTokens: usage.completionTokens, totalTokens: usage.totalTokens, source: 'active-recall' })
+    }
 
     return NextResponse.json({ message: text.trim() })
   } catch (error) {

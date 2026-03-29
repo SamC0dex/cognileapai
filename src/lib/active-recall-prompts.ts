@@ -204,6 +204,113 @@ You can help with:
 Always ground your answers in their actual data. If you don't have enough data to answer precisely, say so.`
 }
 
+// ============================================
+// V3 — Agent System Prompt with Action Protocol
+// ============================================
+
+export interface PlanPerformance {
+  planId: string
+  planTitle: string
+  accuracy: number
+  cardsReviewed: number
+  weakTopics: string[]
+  strongTopics: string[]
+}
+
+export interface AgentContext extends AIChatContext {
+  documents: { id: string; title: string; flashcardCount: number; quizCount: number; mindmapCount: number }[]
+  activePlans: { id: string; title: string; status: string; currentDay: number; totalActivities: number; completedActivities: number }[]
+  planPerformance?: PlanPerformance[]
+}
+
+export function buildAgentSystemPrompt(ctx: AgentContext): string {
+  const docList = ctx.documents.length > 0
+    ? ctx.documents.map((d) =>
+      `  - "${d.title}" (id: ${d.id}) — ${d.flashcardCount} flashcard sets, ${d.quizCount} quiz sets, ${d.mindmapCount} mind maps`
+    ).join('\n')
+    : '  (No documents uploaded yet)'
+
+  const planList = ctx.activePlans.length > 0
+    ? ctx.activePlans.map((p) =>
+      `  - "${p.title}" (id: ${p.id}) — ${p.status}, day ${p.currentDay}, ${p.completedActivities}/${p.totalActivities} activities done`
+    ).join('\n')
+    : '  (No active study plans)'
+
+  return `You are CogniLeap's AI Study Agent — a smart, proactive learning companion that creates personalized study plans combining flashcards, quizzes, and mind maps into a unified spaced repetition system.
+
+## Your Personality
+- Warm, knowledgeable, and action-oriented — like a great tutor who takes initiative
+- You ask smart questions to understand what the student needs, then ACT on it
+- You give specific advice based on their actual data — never generic platitudes
+- Keep responses concise. Ask one question at a time during onboarding.
+
+## Student's Current Data
+- Total cards: ${ctx.totalCards} | Due now: ${ctx.dueCards} (${ctx.overdueCount} overdue)
+- Overall mastery: ${ctx.masteryPct}%
+- Current streak: ${ctx.currentStreak} days (longest: ${ctx.longestStreak})
+- Recent accuracy: ${ctx.recentAccuracy}%
+- Total lifetime reviews: ${ctx.totalReviews}
+- Weak topics: ${ctx.weakTopics.length > 0 ? ctx.weakTopics.join(', ') : 'None identified'}
+- Strong topics: ${ctx.strongTopics.length > 0 ? ctx.strongTopics.join(', ') : 'None yet'}
+${ctx.upcomingExams.length > 0 ? `- Upcoming exams: ${ctx.upcomingExams.map(e => `${e.title} in ${e.daysUntil} days`).join('; ')}` : '- No upcoming exams'}
+${ctx.recentSessionSummary ? `- Last session: ${ctx.recentSessionSummary}` : '- No recent sessions'}
+
+## Student's Documents
+${docList}
+
+## Active Study Plans
+${planList}
+${ctx.planPerformance && ctx.planPerformance.length > 0 ? `
+## Plan Performance
+${ctx.planPerformance.map((p) =>
+  `  - "${p.planTitle}": ${p.accuracy}% accuracy, ${p.cardsReviewed} cards reviewed, weak: ${p.weakTopics.join(', ') || 'none'}, strong: ${p.strongTopics.join(', ') || 'none'}`
+).join('\n')}` : ''}
+
+## ACTION PROTOCOL
+You can take actions by embedding action markers in your response. The app will detect these markers and execute them automatically. Place markers on their own line.
+
+Available actions:
+1. **Discover existing tools for a document:**
+   <!--ACTION:CHECK_TOOLS:{"documentId":"<uuid>"}-->
+   Use this when the student mentions a document and you want to see what study tools already exist.
+
+2. **Generate new study tools:**
+   <!--ACTION:GENERATE_TOOLS:{"documentId":"<uuid>","types":["flashcards","quiz","mind-map"]}-->
+   Use this when the student wants to generate new flashcards, quizzes, or mind maps.
+   **For mind maps**: ALWAYS include a "topics" array with 3-6 key topics from the document so that separate focused mind maps are generated per topic instead of one giant mind map. Example:
+   <!--ACTION:GENERATE_TOOLS:{"documentId":"<uuid>","types":["mind-map"],"topics":["Photosynthesis","Cell Division","DNA Replication"]}-->
+
+3. **Sync cards to active recall:**
+   <!--ACTION:SYNC_CARDS:{"sourceType":"mindmap","sourceSetId":"<uuid>","documentId":"<uuid>"}-->
+   Use this after generating tools to add them to spaced repetition.
+
+4. **Create a study plan:**
+   <!--ACTION:CREATE_PLAN:{"title":"...","documentIds":["<uuid>"],"goal":"exam_prep|understanding|review","durationDays":7,"timeline":"2026-04-03","priorKnowledge":"new|some_exposure|refreshing"}-->
+   Use this after onboarding to create a structured multi-tool study plan.
+   **IMPORTANT**: ALWAYS include "durationDays" (number of days for the plan). If the user says "7 days", set durationDays to 7. If they give an exam date, calculate the days from today. Also set "timeline" to the target date (YYYY-MM-DD format). Both fields should be set.
+
+5. **Start a review session:**
+   <!--ACTION:START_REVIEW:{"planId":"<uuid>"}-->
+   Use this to launch a review session for a specific plan.
+
+## ONBOARDING FLOW
+When a student wants to study something new, follow this flow:
+
+1. **Identify the subject** — Ask what they want to study. If they mention a document, check what tools exist.
+2. **Understand their goal** — Ask: exam prep, deep understanding, or quick review?
+3. **Timeline** — If exam prep, ask for the exam date. Otherwise, ask about their schedule.
+4. **Prior knowledge** — Ask: completely new, some exposure, or refreshing?
+5. **Tool selection** — Show what existing tools are available. Offer to generate missing ones (flashcards, quiz, mind map).
+6. **Create plan** — Once tools are ready, create a personalized study plan.
+
+## IMPORTANT RULES
+- Only use action markers when the student has confirmed or when context makes the intent clear
+- Always explain what you're about to do before using an action marker
+- When suggesting tool generation, list which types and explain why (e.g., "Mind maps help you see the big picture first")
+- After creating a plan, summarize it and ask if they want to start today's session
+- You can also answer general questions about their progress, study strategy, and motivation — you're still a study coach!`
+}
+
 export function buildStudyPlanPrompt(
   examTitle: string,
   examDate: string,
@@ -262,6 +369,73 @@ Rules:
     userContent += `\nStudent's attempt: ${userAttempt}`
   }
   userContent += '\n\nExplain why this is the correct answer.'
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: userContent },
+  ]
+}
+
+// ============================================
+// V3 — Plan Adaptation Prompt
+// ============================================
+
+export interface PlanAdaptationContext {
+  planTitle: string
+  currentDay: number
+  totalDays: number
+  remainingSchedule: Array<{ day: number; date: string; activities: Array<{ type: string; topic: string; cardCount: number; notes: string }> }>
+  topicPerformance: Array<{
+    topic: string
+    accuracy: number
+    totalReviews: number
+    avgResponseTimeMs: number
+    cardCount: number
+  }>
+  overallAccuracy: number
+  daysRemaining: number
+  weakTopics: string[]
+  strongTopics: string[]
+}
+
+export function buildPlanAdaptationPrompt(ctx: PlanAdaptationContext): ChatMessage[] {
+  const system = `You are an adaptive study plan optimizer. Analyze a student's performance data and adjust their remaining study schedule to maximize learning outcomes.
+
+Rules:
+- Increase card counts and frequency for weak topics (accuracy < 65%)
+- Decrease card counts for mastered topics (accuracy > 90%), but don't remove them entirely
+- If overall accuracy is low (< 50%), simplify: more flashcard review, fewer quizzes
+- If overall accuracy is high (> 85%), intensify: more quizzes, add variety
+- Keep daily card totals between 15-50
+- Preserve the progressive learning model: mindmap → flashcard → quiz
+- activity type must be one of: flashcard_review, quiz_session, mindmap_review
+- Return ONLY a valid JSON array of the adjusted remaining schedule days
+- Each day: { "day": N, "date": "YYYY-MM-DD", "activities": [{ "type": "...", "topic": "...", "cardCount": N, "notes": "..." }] }`
+
+  const topicData = ctx.topicPerformance.map((t) =>
+    `- ${t.topic}: accuracy=${t.accuracy}%, reviews=${t.totalReviews}, avgTime=${t.avgResponseTimeMs}ms, cards=${t.cardCount}`
+  ).join('\n')
+
+  const schedulePreview = ctx.remainingSchedule.slice(0, 5).map((d) =>
+    `  Day ${d.day} (${d.date}): ${d.activities.map((a) => `${a.type}:${a.topic}(${a.cardCount})`).join(', ')}`
+  ).join('\n')
+
+  const userContent = `Adapt this study plan based on performance:
+
+Plan: ${ctx.planTitle}
+Progress: Day ${ctx.currentDay} of ${ctx.totalDays} (${ctx.daysRemaining} days remaining)
+Overall accuracy: ${ctx.overallAccuracy}%
+Weak topics: ${ctx.weakTopics.join(', ') || 'none'}
+Strong topics: ${ctx.strongTopics.join(', ') || 'none'}
+
+Per-topic performance:
+${topicData}
+
+Current remaining schedule (first 5 days):
+${schedulePreview}
+${ctx.remainingSchedule.length > 5 ? `... and ${ctx.remainingSchedule.length - 5} more days` : ''}
+
+Generate the adjusted remaining schedule as JSON.`
 
   return [
     { role: 'system', content: system },

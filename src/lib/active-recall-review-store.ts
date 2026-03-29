@@ -37,6 +37,8 @@ interface ReviewStoreActions {
   initSession: (sessionId: string, cards: ReviewCard[], config?: ReviewSessionConfig) => void
   flipCard: () => void
   rateCard: (rating: SM2Rating) => Promise<void>
+  rateMindMapGroup: (sourceSetId: string, rating: SM2Rating) => Promise<void>
+  skipCard: () => void
   undoLastRating: () => Promise<void>
   endSession: () => Promise<void>
   fetchFeedback: () => Promise<void>
@@ -109,6 +111,28 @@ export const useReviewStore = create<ReviewStore>()((set, get) => ({
     const revealTime = state.cardRevealedAt?.getTime() ?? now - 2000
     const responseTimeMs = Math.max(500, now - revealTime)
 
+    // Build result optimistically — update even if server call fails
+    const result: ReviewSessionResult = {
+      card_id: card.id,
+      rating,
+      response_time_ms: responseTimeMs,
+      previous_layer: card.recall_layer,
+      new_layer: card.recall_layer, // Will be updated if API succeeds
+    }
+
+    const undoEntry: ReviewUndoEntry = {
+      cardIndex: state.currentCardIndex,
+      previousRating: result,
+      previousCardState: {
+        ease_factor: card.ease_factor,
+        interval_days: card.interval_days,
+        repetitions: card.repetitions,
+        recall_layer: card.recall_layer,
+        next_review_at: card.next_review_at,
+        consecutive_correct: card.consecutive_correct,
+      },
+    }
+
     try {
       const response = await fetch('/api/active-recall/review', {
         method: 'POST',
@@ -121,48 +145,118 @@ export const useReviewStore = create<ReviewStore>()((set, get) => ({
         }),
       })
 
-      if (!response.ok) throw new Error('Failed to rate card')
+      if (response.ok) {
+        const data = await response.json()
+        result.new_layer = data.layerChange?.to ?? card.recall_layer
+      } else {
+        console.error('[ReviewStore] Rate API error:', response.status)
+      }
+    } catch (error) {
+      console.error('[ReviewStore] Rate network error:', error)
+    }
 
-      const data = await response.json()
+    // Always advance the card — don't get stuck on API failure
+    const isLastCard = state.currentCardIndex >= state.cards.length - 1
+
+    set((s) => ({
+      ratings: [...s.ratings, result],
+      undoStack: [...s.undoStack, undoEntry],
+      currentCardIndex: isLastCard ? s.currentCardIndex : s.currentCardIndex + 1,
+      showAnswer: false,
+      cardRevealedAt: null,
+      cardShownAt: new Date(),
+      isRating: false,
+      isComplete: isLastCard,
+    }))
+  },
+
+  rateMindMapGroup: async (sourceSetId, rating) => {
+    const state = get()
+    if (!state.isActive || state.isRating) return
+
+    set({ isRating: true })
+
+    // Find ALL mindmap cards with this source_set_id
+    const groupCards = state.cards.filter(
+      (c) => c.source_type === 'mindmap' && c.source_set_id === sourceSetId
+    )
+    const groupCardIds = new Set(groupCards.map((c) => c.id))
+
+    const now = Date.now()
+    const results: ReviewSessionResult[] = []
+
+    // Rate each card in the group via API
+    for (const card of groupCards) {
+      // Skip cards already rated
+      if (state.ratings.some((r) => r.card_id === card.id)) continue
 
       const result: ReviewSessionResult = {
         card_id: card.id,
         rating,
-        response_time_ms: responseTimeMs,
+        response_time_ms: 5000, // flat time for group rating
         previous_layer: card.recall_layer,
-        new_layer: data.layerChange?.to ?? card.recall_layer,
+        new_layer: card.recall_layer,
       }
 
-      // Save undo entry
-      const undoEntry: ReviewUndoEntry = {
-        cardIndex: state.currentCardIndex,
-        previousRating: result,
-        previousCardState: {
-          ease_factor: card.ease_factor,
-          interval_days: card.interval_days,
-          repetitions: card.repetitions,
-          recall_layer: card.recall_layer,
-          next_review_at: card.next_review_at,
-          consecutive_correct: card.consecutive_correct,
-        },
-      }
+      try {
+        const response = await fetch('/api/active-recall/review', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cardId: card.id,
+            rating,
+            responseTimeMs: 5000,
+            sessionId: state.sessionId,
+          }),
+        })
+        if (response.ok) {
+          const data = await response.json()
+          result.new_layer = data.layerChange?.to ?? card.recall_layer
+        }
+      } catch { /* continue */ }
 
-      const isLastCard = state.currentCardIndex >= state.cards.length - 1
-
-      set((s) => ({
-        ratings: [...s.ratings, result],
-        undoStack: [...s.undoStack, undoEntry],
-        currentCardIndex: isLastCard ? s.currentCardIndex : s.currentCardIndex + 1,
-        showAnswer: false,
-        cardRevealedAt: null,
-        cardShownAt: new Date(),
-        isRating: false,
-        isComplete: isLastCard,
-      }))
-    } catch (error) {
-      console.error('[ReviewStore] Rate error:', error)
-      set({ isRating: false })
+      results.push(result)
     }
+
+    // Remove group cards from deck and advance
+    const remainingCards = state.cards.filter((c) => !groupCardIds.has(c.id))
+    const newIndex = Math.min(state.currentCardIndex, Math.max(0, remainingCards.length - 1))
+
+    set((s) => ({
+      cards: remainingCards.length > 0 ? remainingCards : s.cards,
+      ratings: [...s.ratings, ...results],
+      currentCardIndex: remainingCards.length > 0 ? newIndex : s.currentCardIndex,
+      showAnswer: false,
+      cardRevealedAt: null,
+      cardShownAt: new Date(),
+      isRating: false,
+      isComplete: remainingCards.length === 0,
+    }))
+  },
+
+  skipCard: () => {
+    const state = get()
+    if (!state.isActive || state.isRating || state.isComplete) return
+
+    const card = state.cards[state.currentCardIndex]
+    if (!card) return
+
+    // Move skipped card to end of the deck (so it comes back later)
+    const newCards = [...state.cards]
+    newCards.splice(state.currentCardIndex, 1)
+    newCards.push(card)
+
+    set({
+      cards: newCards,
+      // currentCardIndex stays the same (next card slides into position)
+      showAnswer: false,
+      cardRevealedAt: null,
+      cardShownAt: new Date(),
+      // If we skipped the last remaining card, it wraps to position 0
+      currentCardIndex: state.currentCardIndex >= newCards.length
+        ? 0
+        : state.currentCardIndex,
+    })
   },
 
   undoLastRating: async () => {

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { routedCompletionStream } from '@/lib/ai-router'
-import { buildAIChatSystemPrompt, type AIChatContext } from '@/lib/active-recall-prompts'
+import { routedCompletionStream, type ResolvedAIConfig } from '@/lib/ai-router'
+import { recordUsage } from '@/lib/usage-tracker'
+import { buildAgentSystemPrompt, buildAIChatSystemPrompt, type AgentContext, type AIChatContext, type PlanPerformance } from '@/lib/active-recall-prompts'
 import { RecallLayer } from '@/types/active-recall'
-import type { ChatMessage } from '@/lib/ai-providers'
+import type { ChatMessage, TokenUsage } from '@/lib/ai-providers'
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,8 +15,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { messages: clientMessages } = await req.json() as {
+    const { messages: clientMessages, agentMode } = await req.json() as {
       messages: { role: 'user' | 'assistant'; content: string }[]
+      agentMode?: boolean
     }
 
     if (!clientMessages?.length) {
@@ -25,10 +27,10 @@ export async function POST(req: NextRequest) {
     // Gather learning context for the system prompt
     const now = new Date().toISOString()
 
-    const [cardsResult, streakResult, sessionsResult, examsResult] = await Promise.all([
+    const [cardsResult, streakResult, sessionsResult, examsResult, documentsResult, plansResult] = await Promise.all([
       supabase
         .from('review_cards')
-        .select('topic, recall_layer, next_review_at, correct_reviews, total_reviews')
+        .select('topic, recall_layer, next_review_at, correct_reviews, total_reviews, document_id, source_type, source_set_id')
         .eq('user_id', user.id),
       supabase
         .from('user_streaks')
@@ -48,6 +50,19 @@ export async function POST(req: NextRequest) {
         .gte('exam_date', new Date().toISOString().split('T')[0])
         .order('exam_date', { ascending: true })
         .limit(5),
+      // Fetch user's documents
+      supabase
+        .from('documents')
+        .select('id, title')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20),
+      // Fetch active agent study plans
+      supabase
+        .from('agent_study_plans')
+        .select('id, title, status, current_day, total_activities, completed_activities')
+        .eq('user_id', user.id)
+        .in('status', ['active', 'paused']),
     ])
 
     const allCards = cardsResult.data || []
@@ -102,23 +117,135 @@ export async function POST(req: NextRequest) {
       daysUntil: Math.ceil((new Date(e.exam_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
     }))
 
-    const ctx: AIChatContext = {
-      totalCards: allCards.length,
-      dueCards: dueCards.length,
-      overdueCount: overdueCards.length,
-      masteryPct,
-      currentStreak: streakResult.data?.review_streak || 0,
-      longestStreak: streakResult.data?.longest_streak || 0,
-      weakTopics: weakTopics.slice(0, 5),
-      strongTopics: strongTopics.slice(0, 5),
-      recentAccuracy,
-      totalReviews: streakResult.data?.total_cards_reviewed || 0,
-      upcomingExams,
-      recentSessionSummary,
+    // Build system prompt — use agent prompt if agentMode, otherwise standard
+    let systemPrompt: string
+
+    if (agentMode !== false) {
+      // Build document tool counts from review_cards
+      const docToolCounts = new Map<string, { flashcardSets: Set<string>; quizSets: Set<string>; mindmapSets: Set<string> }>()
+      allCards.forEach((c) => {
+        if (!c.document_id) return
+        const existing = docToolCounts.get(c.document_id) || {
+          flashcardSets: new Set<string>(),
+          quizSets: new Set<string>(),
+          mindmapSets: new Set<string>(),
+        }
+        if (c.source_type === 'flashcard') existing.flashcardSets.add(c.source_set_id)
+        else if (c.source_type === 'quiz') existing.quizSets.add(c.source_set_id)
+        else if (c.source_type === 'mindmap') existing.mindmapSets.add(c.source_set_id)
+        docToolCounts.set(c.document_id, existing)
+      })
+
+      const documents = (documentsResult.data || []).map((d) => {
+        const tools = docToolCounts.get(d.id)
+        return {
+          id: d.id,
+          title: d.title,
+          flashcardCount: tools?.flashcardSets.size || 0,
+          quizCount: tools?.quizSets.size || 0,
+          mindmapCount: tools?.mindmapSets.size || 0,
+        }
+      })
+
+      const activePlans = (plansResult.data || []).map((p) => ({
+        id: p.id,
+        title: p.title,
+        status: p.status,
+        currentDay: p.current_day,
+        totalActivities: p.total_activities,
+        completedActivities: p.completed_activities,
+      }))
+
+      // Compute per-plan performance from review_cards
+      const planPerformance: PlanPerformance[] = []
+      if (activePlans.length > 0) {
+        // Group cards by plan_id
+        const cardsByPlan = new Map<string, typeof allCards>()
+        allCards.forEach((c) => {
+          if (!c.document_id) return
+          // Cards with plan associations can be identified by checking document overlap
+          // For now, compute for all cards in plan-linked documents
+        })
+
+        // Fetch plan-linked cards directly
+        for (const ap of activePlans.slice(0, 3)) {
+          const { data: planCards } = await supabase
+            .from('review_cards')
+            .select('topic, correct_reviews, total_reviews')
+            .eq('user_id', user.id)
+            .eq('plan_id', ap.id)
+
+          if (planCards && planCards.length > 0) {
+            let pCorrect = 0, pTotal = 0
+            const pTopicStats = new Map<string, { correct: number; total: number }>()
+            planCards.forEach((c) => {
+              pCorrect += c.correct_reviews || 0
+              pTotal += c.total_reviews || 0
+              const t = c.topic || 'General'
+              const ex = pTopicStats.get(t) || { correct: 0, total: 0 }
+              ex.correct += c.correct_reviews || 0
+              ex.total += c.total_reviews || 0
+              pTopicStats.set(t, ex)
+            })
+
+            const pWeak: string[] = []
+            const pStrong: string[] = []
+            pTopicStats.forEach((s, t) => {
+              if (s.total < 2) return
+              const acc = (s.correct / s.total) * 100
+              if (acc < 65) pWeak.push(t)
+              else if (acc > 85) pStrong.push(t)
+            })
+
+            planPerformance.push({
+              planId: ap.id,
+              planTitle: ap.title,
+              accuracy: pTotal > 0 ? Math.round((pCorrect / pTotal) * 100) : 0,
+              cardsReviewed: pTotal,
+              weakTopics: pWeak,
+              strongTopics: pStrong,
+            })
+          }
+        }
+      }
+
+      const agentCtx: AgentContext = {
+        totalCards: allCards.length,
+        dueCards: dueCards.length,
+        overdueCount: overdueCards.length,
+        masteryPct,
+        currentStreak: streakResult.data?.review_streak || 0,
+        longestStreak: streakResult.data?.longest_streak || 0,
+        weakTopics: weakTopics.slice(0, 5),
+        strongTopics: strongTopics.slice(0, 5),
+        recentAccuracy,
+        totalReviews: streakResult.data?.total_cards_reviewed || 0,
+        upcomingExams,
+        recentSessionSummary,
+        documents,
+        activePlans,
+        planPerformance: planPerformance.length > 0 ? planPerformance : undefined,
+      }
+
+      systemPrompt = buildAgentSystemPrompt(agentCtx)
+    } else {
+      const ctx: AIChatContext = {
+        totalCards: allCards.length,
+        dueCards: dueCards.length,
+        overdueCount: overdueCards.length,
+        masteryPct,
+        currentStreak: streakResult.data?.review_streak || 0,
+        longestStreak: streakResult.data?.longest_streak || 0,
+        weakTopics: weakTopics.slice(0, 5),
+        strongTopics: strongTopics.slice(0, 5),
+        recentAccuracy,
+        totalReviews: streakResult.data?.total_cards_reviewed || 0,
+        upcomingExams,
+        recentSessionSummary,
+      }
+      systemPrompt = buildAIChatSystemPrompt(ctx)
     }
 
-    // Build messages with system prompt
-    const systemPrompt = buildAIChatSystemPrompt(ctx)
     const aiMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...clientMessages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -131,15 +258,25 @@ export async function POST(req: NextRequest) {
         try {
           const generator = routedCompletionStream(user.id, {
             messages: aiMessages,
-            maxTokens: 1000,
+            maxTokens: 2000,
             temperature: 0.7,
           })
+
+          let finalUsage: TokenUsage | null = null
+          let finalConfig: ResolvedAIConfig | undefined
 
           for await (const chunk of generator) {
             if (chunk.text) {
               const data = JSON.stringify(chunk.text)
               controller.enqueue(encoder.encode(`0:${data}\n`))
             }
+            if (chunk.usage) finalUsage = chunk.usage
+            if (chunk.config) finalConfig = chunk.config
+          }
+
+          // Record usage after stream completes
+          if (finalUsage && finalConfig) {
+            recordUsage({ userId: user.id, provider: finalConfig.provider, model: finalConfig.model, inputTokens: finalUsage.promptTokens, outputTokens: finalUsage.completionTokens, totalTokens: finalUsage.totalTokens, source: 'active-recall' })
           }
 
           controller.close()

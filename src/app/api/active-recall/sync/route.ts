@@ -11,8 +11,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body: SyncRequest = await req.json()
-    const { sourceType, sourceSetId, documentId, cards } = body
+    const body: SyncRequest & { planId?: string } = await req.json()
+    const { sourceType, sourceSetId, documentId, cards, planId } = body
 
     if (!sourceType || !sourceSetId || !cards?.length) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
             source_id: card.id,
             source_set_id: sourceSetId,
             document_id: documentId || null,
+            plan_id: planId || null,
             question: card.question,
             answer: card.answer,
             options: card.options || null,
@@ -62,6 +63,16 @@ export async function POST(req: NextRequest) {
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
       .eq('source_set_id', sourceSetId)
+
+    // Ensure plan_id is set on all cards for this source set (including pre-existing ones)
+    if (planId) {
+      await supabase
+        .from('review_cards')
+        .update({ plan_id: planId })
+        .eq('user_id', user.id)
+        .eq('source_set_id', sourceSetId)
+        .is('plan_id', null)
+    }
 
     existing = (count || 0) - synced
     if (existing < 0) existing = 0

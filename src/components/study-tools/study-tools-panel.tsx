@@ -2353,6 +2353,32 @@ const StudyToolsPanelContent: React.FC<{
     }
   }, [documentId, conversationId, hasContext, loadStudyToolsFromDatabase])
 
+  // Listen for refresh events from AI Agent sidebar
+  React.useEffect(() => {
+    const handleRefresh = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      const eventDocId = detail?.documentId as string | undefined
+      const eventDocIds = detail?.documentIds as string[] | undefined
+      // Reload for current doc context
+      loadStudyToolsFromDatabase(documentId, conversationId)
+      // Also reload for the agent's target document if different
+      if (eventDocId && eventDocId !== documentId) {
+        loadStudyToolsFromDatabase(eventDocId)
+      }
+      if (eventDocIds) {
+        for (const id of eventDocIds) {
+          if (id !== documentId) loadStudyToolsFromDatabase(id)
+        }
+      }
+    }
+    window.addEventListener('study-tools-refresh', handleRefresh)
+    window.addEventListener('agent-action-completed', handleRefresh)
+    return () => {
+      window.removeEventListener('study-tools-refresh', handleRefresh)
+      window.removeEventListener('agent-action-completed', handleRefresh)
+    }
+  }, [documentId, conversationId, loadStudyToolsFromDatabase])
+
   const handleGenerateStudyTool = React.useCallback((type: StudyToolType) => {
     // Remove the global blocking check - allow concurrent generations
     // The store will handle individual generation tracking

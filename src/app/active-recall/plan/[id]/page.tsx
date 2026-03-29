@@ -1,0 +1,650 @@
+'use client'
+
+import React, { useEffect, useState, useCallback } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { motion, AnimatePresence } from 'framer-motion'
+import {
+  ArrowLeft,
+  Play,
+  Pause,
+  Trash2,
+  Pencil,
+  Check,
+  X,
+  Calendar,
+  Target,
+  FileText,
+  FlaskConical,
+  TreePine,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  CheckCircle2,
+  Circle,
+  BarChart3,
+  Clock,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+import {
+  Button,
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from '@/components/ui'
+
+interface PlanActivity {
+  type: 'flashcard_review' | 'quiz_session' | 'mindmap_review'
+  sourceSetId?: string
+  topic: string
+  cardCount: number
+  notes: string
+  completed: boolean
+}
+
+interface PlanScheduleDay {
+  day: number
+  date: string
+  activities: PlanActivity[]
+  isCompleted?: boolean
+}
+
+interface PlanDetail {
+  id: string
+  title: string
+  status: 'active' | 'paused' | 'completed' | 'archived'
+  document_ids: string[]
+  onboarding_context: { goal: string; timeline?: string; priorKnowledge: string }
+  schedule: PlanScheduleDay[]
+  currentDay: number
+  totalDays: number
+  total_activities: number
+  completed_activities: number
+  created_at: string
+}
+
+interface PlanStats {
+  totalCards: number
+  dueCards: number
+  cardsByType: Record<string, number>
+  cardsByLayer: Record<string, number>
+}
+
+const ACTIVITY_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string; reviewType: string }> = {
+  flashcard_review: {
+    icon: <FileText className="h-3.5 w-3.5" />,
+    label: 'Flashcards',
+    color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-200 dark:border-blue-800',
+    reviewType: 'flashcard',
+  },
+  quiz_session: {
+    icon: <FlaskConical className="h-3.5 w-3.5" />,
+    label: 'Quiz',
+    color: 'text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-200 dark:border-violet-800',
+    reviewType: 'quiz',
+  },
+  mindmap_review: {
+    icon: <TreePine className="h-3.5 w-3.5" />,
+    label: 'Mind Map',
+    color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-200 dark:border-emerald-800',
+    reviewType: 'mindmap',
+  },
+}
+
+function activityUnit(type: string, count?: number): string {
+  const n = count ?? 2 // default plural
+  if (type === 'mindmap_review') return n === 1 ? 'mind map' : 'mind maps'
+  if (type === 'quiz_session') return n === 1 ? 'question' : 'questions'
+  return n === 1 ? 'card' : 'cards'
+}
+
+export default function PlanDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const router = useRouter()
+  const [plan, setPlan] = useState<PlanDetail | null>(null)
+  const [stats, setStats] = useState<PlanStats | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Edit states
+  const [isRenaming, setIsRenaming] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+
+  // Expanded days
+  const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set())
+
+  const fetchPlan = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/active-recall/agent/plans/${id}`)
+      if (!res.ok) {
+        setError('Plan not found')
+        return
+      }
+      const data = await res.json()
+      setPlan(data.plan)
+      setStats(data.stats)
+      // Auto-expand today's day
+      if (data.plan?.currentDay) {
+        setExpandedDays(new Set([data.plan.currentDay]))
+      }
+    } catch {
+      setError('Failed to load plan')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    fetchPlan()
+  }, [fetchPlan])
+
+  const handleRename = async () => {
+    if (!renameValue.trim() || !plan) return
+    try {
+      const res = await fetch(`/api/active-recall/agent/plans/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename', title: renameValue.trim() }),
+      })
+      if (res.ok) {
+        setPlan({ ...plan, title: renameValue.trim() })
+      }
+    } catch { /* ignore */ }
+    setIsRenaming(false)
+  }
+
+  const handleToggleStatus = async () => {
+    if (!plan) return
+    setIsTogglingStatus(true)
+    try {
+      const res = await fetch(`/api/active-recall/agent/plans/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_status' }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setPlan({ ...plan, status: data.status })
+      }
+    } catch { /* ignore */ }
+    setIsTogglingStatus(false)
+  }
+
+  const handleDelete = async () => {
+    setIsDeleting(true)
+    try {
+      const res = await fetch(`/api/active-recall/agent/plans/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        window.dispatchEvent(new Event('study-tools-refresh'))
+        router.push('/active-recall')
+      }
+    } catch { /* ignore */ }
+    setIsDeleting(false)
+    setShowDeleteDialog(false)
+  }
+
+  const handleToggleActivity = async (day: number, activityIndex: number) => {
+    if (!plan) return
+    const dayEntry = plan.schedule.find(d => d.day === day)
+    const wasCompleted = !!dayEntry?.activities[activityIndex]?.completed
+
+    // Optimistic update
+    const newSchedule = plan.schedule.map(d => {
+      if (d.day !== day) return d
+      const newActivities = d.activities.map((a, i) =>
+        i === activityIndex ? { ...a, completed: !wasCompleted } : a
+      )
+      return { ...d, activities: newActivities, isCompleted: newActivities.every(a => a.completed) }
+    })
+    const newCompleted = Math.max(0, (plan.completed_activities || 0) + (wasCompleted ? -1 : 1))
+    setPlan({ ...plan, schedule: newSchedule, completed_activities: newCompleted })
+
+    try {
+      await fetch(`/api/active-recall/agent/plans/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'complete_activity', day, activityIndex }),
+      })
+    } catch {
+      // Revert on failure
+      fetchPlan()
+    }
+  }
+
+  const handleStartSession = (sourceType?: string, includeAll?: boolean) => {
+    let url = `/active-recall/review?plan_id=${id}`
+    if (sourceType) url += `&source_type=${sourceType}`
+    if (includeAll) url += `&include_all=true`
+    router.push(url)
+  }
+
+  const toggleDay = (day: number) => {
+    setExpandedDays(prev => {
+      const next = new Set(prev)
+      if (next.has(day)) next.delete(day)
+      else next.add(day)
+      return next
+    })
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-[60vh]">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (error || !plan) {
+    return (
+      <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
+        <p className="text-muted-foreground">{error || 'Plan not found'}</p>
+        <Button variant="outline" size="sm" onClick={() => router.push('/active-recall')}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back
+        </Button>
+      </div>
+    )
+  }
+
+  const progress = plan.total_activities > 0
+    ? Math.round((plan.completed_activities / plan.total_activities) * 100)
+    : 0
+  const daysRemaining = Math.max(0, plan.totalDays - plan.currentDay + 1)
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+      {/* Back + Header */}
+      <div>
+        <button
+          onClick={() => router.push('/active-recall')}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Dashboard
+        </button>
+
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            {isRenaming ? (
+              <div className="flex items-center gap-2">
+                <input
+                  autoFocus
+                  value={renameValue}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleRename()
+                    if (e.key === 'Escape') setIsRenaming(false)
+                  }}
+                  className="text-xl font-bold bg-transparent border-b-2 border-primary outline-none w-full"
+                />
+                <button onClick={handleRename} className="p-1 hover:bg-muted rounded">
+                  <Check className="h-4 w-4 text-green-600" />
+                </button>
+                <button onClick={() => setIsRenaming(false)} className="p-1 hover:bg-muted rounded">
+                  <X className="h-4 w-4 text-muted-foreground" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold truncate">{plan.title}</h1>
+                <button
+                  onClick={() => { setRenameValue(plan.title); setIsRenaming(true) }}
+                  className="p-1 hover:bg-muted rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Rename"
+                >
+                  <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+                <span className={cn(
+                  'text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0',
+                  plan.status === 'active' && 'bg-green-500/10 text-green-600 dark:text-green-400',
+                  plan.status === 'paused' && 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
+                  plan.status === 'completed' && 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+                )}>
+                  {plan.status}
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Calendar className="h-3 w-3" />
+                Day {plan.currentDay} of {plan.totalDays}
+              </span>
+              <span className="flex items-center gap-1">
+                <Target className="h-3 w-3" />
+                {plan.completed_activities}/{plan.total_activities} activities
+              </span>
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {daysRemaining} days left
+              </span>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleToggleStatus}
+              disabled={isTogglingStatus}
+              className="gap-1.5"
+            >
+              {plan.status === 'active' ? (
+                <><Pause className="h-3.5 w-3.5" /> Pause</>
+              ) : (
+                <><Play className="h-3.5 w-3.5" /> Resume</>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setRenameValue(plan.title); setIsRenaming(true) }}
+              className="gap-1.5"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Rename
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDeleteDialog(true)}
+              className="gap-1.5 text-destructive hover:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress + Stats Bar */}
+      <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="flex items-center justify-between text-sm">
+          <span className="font-medium">Overall Progress</span>
+          <span className="text-muted-foreground">{progress}%</span>
+        </div>
+        <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <motion.div
+            className="h-full bg-primary rounded-full"
+            initial={{ width: 0 }}
+            animate={{ width: `${progress}%` }}
+            transition={{ duration: 0.6 }}
+          />
+        </div>
+
+        {/* Stats row */}
+        {stats && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard icon={<BarChart3 className="h-4 w-4" />} label="Total Items" value={stats.totalCards} />
+            <StatCard icon={<Target className="h-4 w-4" />} label="Due Now" value={stats.dueCards} accent />
+            <StatCard icon={<FileText className="h-4 w-4 text-blue-500" />} label="Flashcards" value={stats.cardsByType?.flashcard || 0} />
+            <StatCard icon={<FlaskConical className="h-4 w-4 text-violet-500" />} label="Questions" value={stats.cardsByType?.quiz || 0} />
+          </div>
+        )}
+
+        {/* Start Session CTA */}
+        {(stats?.dueCards || 0) > 0 && (
+          <Button
+            onClick={() => handleStartSession()}
+            variant="purple"
+            className="w-full gap-2"
+          >
+            <Play className="h-4 w-4" />
+            Start Review Session
+            <span className="ml-1 bg-white/20 px-2 py-0.5 rounded-full text-xs">
+              {stats?.dueCards} due
+            </span>
+          </Button>
+        )}
+      </div>
+
+      {/* Schedule Timeline */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold flex items-center gap-2">
+          <Calendar className="h-4 w-4" />
+          Schedule
+        </h2>
+
+        <div className="space-y-1">
+          {plan.schedule.map((day) => {
+            const isToday = day.day === plan.currentDay
+            const isPast = day.day < plan.currentDay
+            const isExpanded = expandedDays.has(day.day)
+            const completedCount = day.activities.filter(a => a.completed).length
+            const totalCount = day.activities.length
+
+            return (
+              <div
+                key={day.day}
+                className={cn(
+                  'rounded-xl border transition-colors',
+                  isToday && 'ring-2 ring-primary/30 border-primary/20 bg-primary/[0.02]',
+                  isPast && day.isCompleted && 'opacity-60',
+                )}
+              >
+                {/* Day Header */}
+                <button
+                  onClick={() => toggleDay(day.day)}
+                  className="w-full flex items-center gap-3 p-3.5 text-left hover:bg-muted/50 transition-colors rounded-xl"
+                >
+                  {day.isCompleted ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                  ) : isToday ? (
+                    <div className="h-4 w-4 rounded-full bg-primary/20 border-2 border-primary shrink-0" />
+                  ) : (
+                    <Circle className="h-4 w-4 text-muted-foreground/40 shrink-0" />
+                  )}
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={cn('text-sm font-medium', isToday && 'text-primary')}>
+                        Day {day.day}
+                      </span>
+                      {day.date && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(day.date)}
+                        </span>
+                      )}
+                      {isToday && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">
+                          Today
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {completedCount}/{totalCount} activities
+                      {totalCount > 0 && completedCount === totalCount && ' — Complete'}
+                    </div>
+                  </div>
+
+                  {/* Activity type pills preview when collapsed */}
+                  {!isExpanded && (
+                    <div className="flex items-center gap-1 mr-2">
+                      {day.activities.map((a, i) => {
+                        const config = ACTIVITY_CONFIG[a.type]
+                        return config ? (
+                          <span key={i} className={cn('p-1 rounded', config.color)}>
+                            {config.icon}
+                          </span>
+                        ) : null
+                      })}
+                    </div>
+                  )}
+
+                  {isExpanded ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  )}
+                </button>
+
+                {/* Expanded Activities */}
+                <AnimatePresence>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="px-3.5 pb-3.5 space-y-2 ml-7">
+                        {day.activities.map((activity, idx) => (
+                          <ActivityRow
+                            key={idx}
+                            activity={activity}
+                            isToday={isToday}
+                            onComplete={() => handleToggleActivity(day.day, idx)}
+                            onReview={() => handleStartSession(ACTIVITY_CONFIG[activity.type]?.reviewType, true)}
+                          />
+                        ))}
+
+                        {/* Start day's session */}
+                        {isToday && day.activities.some(a => !a.completed) && (
+                          <Button
+                            onClick={() => handleStartSession()}
+                            variant="outline"
+                            size="sm"
+                            className="w-full mt-2 gap-1.5"
+                          >
+                            <Play className="h-3.5 w-3.5" />
+                            Start Day {day.day} Session
+                          </Button>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Delete Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Study Plan</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete &quot;{plan.title}&quot; and unlink all associated review cards.
+              The cards themselves won&apos;t be deleted — they&apos;ll just no longer be part of this plan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Delete Plan
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
+function ActivityRow({
+  activity,
+  isToday,
+  onComplete,
+  onReview,
+}: {
+  activity: PlanActivity
+  isToday: boolean
+  onComplete: () => void
+  onReview: () => void
+}) {
+  const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.flashcard_review
+
+  return (
+    <div className={cn(
+      'flex items-center gap-3 p-2.5 rounded-lg border transition-colors',
+      activity.completed
+        ? 'bg-muted/30 border-muted'
+        : 'bg-card border-border hover:border-primary/20',
+    )}>
+      {/* Completion checkbox */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onComplete() }}
+        className={cn(
+          'shrink-0 transition-colors',
+          activity.completed ? 'text-green-500 hover:text-green-400' : 'text-muted-foreground/40 hover:text-muted-foreground',
+        )}
+      >
+        {activity.completed ? (
+          <CheckCircle2 className="h-4.5 w-4.5" />
+        ) : (
+          <Circle className="h-4.5 w-4.5" />
+        )}
+      </button>
+
+      {/* Type badge */}
+      <span className={cn('flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium shrink-0', config.color)}>
+        {config.icon}
+        {config.label}
+      </span>
+
+      {/* Topic + info */}
+      <div className="flex-1 min-w-0">
+        <p className={cn('text-sm truncate', activity.completed && 'line-through text-muted-foreground')}>
+          {activity.topic}
+        </p>
+        {activity.notes && (
+          <p className="text-xs text-muted-foreground truncate mt-0.5">{activity.notes}</p>
+        )}
+      </div>
+
+      {/* Count */}
+      <span className="text-xs text-muted-foreground shrink-0">
+        {activity.cardCount} {activityUnit(activity.type)}
+      </span>
+
+      {/* Review button */}
+      {isToday && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onReview() }}
+          className="shrink-0 h-7 px-2.5 text-xs gap-1"
+        >
+          <Play className="h-3 w-3" />
+          {activity.completed ? 'Revisit' : 'Review'}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function StatCard({ icon, label, value, accent }: { icon: React.ReactNode; label: string; value: number; accent?: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5 p-3 rounded-lg bg-muted/50">
+      <div className="text-muted-foreground">{icon}</div>
+      <div>
+        <p className={cn('text-lg font-semibold leading-none', accent && value > 0 && 'text-primary')}>
+          {value}
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+      </div>
+    </div>
+  )
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    const d = new Date(dateStr + 'T00:00:00')
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  } catch {
+    return dateStr
+  }
+}

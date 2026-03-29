@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { routedCompletion } from '@/lib/ai-router'
+import { recordUsage } from '@/lib/usage-tracker'
 import { buildWeeklyReportPrompt } from '@/lib/active-recall-prompts'
 import { RecallLayer } from '@/types/active-recall'
 
@@ -121,11 +122,15 @@ export async function POST(req: NextRequest) {
       masteryPct,
     })
 
-    const { text } = await routedCompletion(user.id, {
+    const { text, config, usage } = await routedCompletion(user.id, {
       messages,
       maxTokens: 800,
       temperature: 0.7,
     })
+
+    if (usage) {
+      recordUsage({ userId: user.id, provider: config.provider, model: config.model, inputTokens: usage.promptTokens, outputTokens: usage.completionTokens, totalTokens: usage.totalTokens, source: 'active-recall' })
+    }
 
     // Store report
     const weekStartStr = weekStart.toISOString().split('T')[0]

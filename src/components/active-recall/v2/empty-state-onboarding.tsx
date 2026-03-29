@@ -1,10 +1,22 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Brain, Sparkles, BookOpen, ArrowRight } from 'lucide-react'
+import { Brain, Sparkles, BookOpen, ArrowRight, TreePine, FlaskConical } from 'lucide-react'
 import { Button } from '@/components/ui'
 
-export function EmptyStateOnboarding() {
+interface EmptyStateOnboardingProps {
+  onOpenChat?: () => void
+}
+
+export function EmptyStateOnboarding({ onOpenChat }: EmptyStateOnboardingProps) {
+  const handleGetStarted = () => {
+    if (onOpenChat) {
+      onOpenChat()
+    } else {
+      window.location.href = '/active-recall'
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -16,18 +28,18 @@ export function EmptyStateOnboarding() {
         <Brain className="h-8 w-8 text-primary" />
       </div>
 
-      <h3 className="text-xl font-semibold mb-2">Your AI Study Companion</h3>
+      <h3 className="text-xl font-semibold mb-2">Your AI Study Agent</h3>
       <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
-        Active Recall uses spaced repetition to help you remember what you learn.
-        Generate flashcards or quizzes from your study materials, and the AI will
-        schedule optimal review times to maximize retention.
+        Tell the AI what you want to study and it will create a personalized plan
+        combining flashcards, quizzes, and mind maps — all with spaced repetition.
       </p>
 
       <div className="space-y-3 text-left mb-6">
         {[
-          { icon: BookOpen, text: 'Upload study materials or notes' },
-          { icon: Sparkles, text: 'Generate flashcards or quizzes with AI' },
-          { icon: Brain, text: 'Review at the perfect time for your memory' },
+          { icon: Sparkles, text: 'Tell the AI agent what you want to study' },
+          { icon: BookOpen, text: 'It discovers or generates flashcards, quizzes & mind maps' },
+          { icon: TreePine, text: 'Get a structured multi-tool study plan' },
+          { icon: Brain, text: 'Review everything with AI-optimized spaced repetition' },
         ].map((step, i) => {
           const Icon = step.icon
           return (
@@ -44,9 +56,9 @@ export function EmptyStateOnboarding() {
       <Button
         variant="purple"
         className="gap-2"
-        onClick={() => { window.location.href = '/chat' }}
+        onClick={handleGetStarted}
       >
-        Get Started
+        Open Study Agent
         <ArrowRight className="h-4 w-4" />
       </Button>
     </motion.div>

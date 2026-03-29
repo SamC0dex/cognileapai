@@ -12,16 +12,22 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    const { action, sessionId, documentId, totalTimeMs } = body
+    const { action, sessionId, documentId, planId, totalTimeMs } = body
 
     if (action === 'start') {
       // Create a new session
+      const insertData: Record<string, unknown> = {
+        user_id: user.id,
+        document_id: documentId || null,
+      }
+      if (planId) {
+        insertData.plan_id = planId
+        insertData.session_type = 'plan'
+      }
+
       const { data: session, error } = await supabase
         .from('review_sessions')
-        .insert({
-          user_id: user.id,
-          document_id: documentId || null,
-        })
+        .insert(insertData)
         .select()
         .single()
 

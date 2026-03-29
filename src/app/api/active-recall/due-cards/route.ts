@@ -16,15 +16,22 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50', 10)
     const documentId = searchParams.get('document_id')
     const layer = searchParams.get('layer')
+    const planId = searchParams.get('plan_id')
+    const sourceType = searchParams.get('source_type')
+    const progressive = searchParams.get('progressive') === 'true'
+    const includeAll = searchParams.get('include_all') === 'true'
 
-    // Fetch due cards (next_review_at <= now)
+    // Fetch due cards (next_review_at <= now), or all cards if include_all
     let query = supabase
       .from('review_cards')
       .select('*')
       .eq('user_id', user.id)
-      .lte('next_review_at', new Date().toISOString())
       .order('next_review_at', { ascending: true })
       .limit(limit)
+
+    if (!includeAll) {
+      query = query.lte('next_review_at', new Date().toISOString())
+    }
 
     if (documentId) {
       query = query.eq('document_id', documentId)
@@ -32,8 +39,28 @@ export async function GET(req: NextRequest) {
     if (layer) {
       query = query.eq('recall_layer', parseInt(layer, 10))
     }
+    if (planId) {
+      query = query.eq('plan_id', planId)
+    }
+    if (sourceType) {
+      query = query.eq('source_type', sourceType)
+    }
 
-    const { data: cards, error } = await query
+    const { data: rawCards, error } = await query
+
+    // Progressive ordering: mindmap (ABSORB) → flashcard (RECOGNIZE) → quiz (RETRIEVE)
+    // Within each group: most overdue first (already sorted by next_review_at)
+    let cards = rawCards
+    if (progressive && cards) {
+      const sourceOrder: Record<string, number> = { mindmap: 0, flashcard: 1, quiz: 2 }
+      cards = [...cards].sort((a, b) => {
+        const aOrder = sourceOrder[a.source_type] ?? 1
+        const bOrder = sourceOrder[b.source_type] ?? 1
+        if (aOrder !== bOrder) return aOrder - bOrder
+        // Within same type, keep overdue-first order
+        return new Date(a.next_review_at).getTime() - new Date(b.next_review_at).getTime()
+      })
+    }
 
     if (error) {
       console.error('[ActiveRecall] Due cards fetch error:', error)
@@ -45,10 +72,19 @@ export async function GET(req: NextRequest) {
       .from('review_cards')
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
-      .lte('next_review_at', new Date().toISOString())
+
+    if (!includeAll) {
+      countQuery = countQuery.lte('next_review_at', new Date().toISOString())
+    }
 
     if (documentId) {
       countQuery = countQuery.eq('document_id', documentId)
+    }
+    if (planId) {
+      countQuery = countQuery.eq('plan_id', planId)
+    }
+    if (sourceType) {
+      countQuery = countQuery.eq('source_type', sourceType)
     }
 
     const { count: totalDue } = await countQuery

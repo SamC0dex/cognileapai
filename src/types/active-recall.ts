@@ -51,10 +51,11 @@ export interface RatingOption {
 export interface ReviewCard {
   id: string
   user_id: string
-  source_type: 'flashcard' | 'quiz'
+  source_type: 'flashcard' | 'quiz' | 'mindmap'
   source_id: string
   source_set_id: string
   document_id: string | null
+  plan_id: string | null
   question: string
   answer: string
   options: string[] | null        // Quiz options, null for flashcards
@@ -209,7 +210,7 @@ export interface SyncCardPayload {
 }
 
 export interface SyncRequest {
-  sourceType: 'flashcard' | 'quiz'
+  sourceType: 'flashcard' | 'quiz' | 'mindmap'
   sourceSetId: string
   documentId?: string
   cards: SyncCardPayload[]
@@ -329,6 +330,7 @@ export interface ActiveRecallStoreActions {
   // Sync
   syncFromFlashcards: (flashcardSetId: string, documentId?: string) => Promise<void>
   syncFromQuiz: (quizSetId: string, documentId?: string) => Promise<void>
+  syncFromMindMap: (mindMapSetId: string, documentId?: string) => Promise<void>
 
   // Reset
   reset: () => void
@@ -462,4 +464,48 @@ export interface LearningContext {
   recentAccuracy: number
   upcomingExams: { title: string; daysUntil: number }[]
   dailyGoal: DailyGoal | null
+}
+
+// ============================================
+// V3 Types — Agent Study Plans, Multi-Tool Learning
+// ============================================
+
+export interface AgentStudyPlan {
+  id: string
+  user_id: string
+  title: string
+  document_ids: string[]
+  exam_id: string | null
+  onboarding_context: AgentOnboardingContext
+  schedule: PlanScheduleDay[]
+  status: 'active' | 'paused' | 'completed' | 'archived'
+  current_day: number
+  total_activities: number
+  completed_activities: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentOnboardingContext {
+  goal: 'exam_prep' | 'understanding' | 'review' | 'custom'
+  timeline?: string
+  priorKnowledge: 'new' | 'some_exposure' | 'refreshing'
+  selectedToolIds?: string[]
+  notes?: string
+}
+
+export interface PlanScheduleDay {
+  day: number
+  date: string
+  activities: PlanActivity[]
+  isCompleted?: boolean
+}
+
+export interface PlanActivity {
+  type: 'flashcard_review' | 'quiz_session' | 'mindmap_review'
+  sourceSetId: string
+  topic: string
+  cardCount: number
+  notes: string
+  completed: boolean
 }

@@ -78,7 +78,7 @@ const TOOL_TOKEN_ALLOCATIONS: Record<string, number> = {
   'smart-summary': 16384,  // Summaries should be more concise
   'flashcards': 8192,      // JSON arrays don't need as many tokens
   'quiz': 16384,            // Quiz JSON with explanations needs more tokens
-  'mind-map': 16384         // Mind map JSON with nested nodes needs adequate tokens
+  'mind-map': GEMINI_MAX_OUTPUT_TOKENS  // Full capacity — mind maps vary wildly in size based on document content
 }
 
 const MODEL_HIERARCHY: ModelConfig[] = [
@@ -377,6 +377,7 @@ interface StudyToolGenerateRequest {
     focusArea?: string
     visualStyle: 'radial' | 'tree' | 'organic'
     customInstructions?: string
+    batchTopics?: string[]  // Generate multiple focused mindmaps in one request
   }
 }
 
@@ -577,7 +578,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get the appropriate prompts for the study tool type
-    const { systemPrompt, userPrompt } = getStudyToolPrompt(
+    let { systemPrompt, userPrompt } = getStudyToolPrompt(
       type as StudyToolPromptType,
       documentContent,
       documentTitle,
@@ -600,6 +601,83 @@ export async function POST(req: NextRequest) {
         customInstructions: mindMapOptions.customInstructions
       } : undefined
     )
+
+    // Override prompt for batch mind map generation (multiple topic-focused maps in one call)
+    if (type === 'mind-map' && mindMapOptions?.batchTopics?.length) {
+      const batchTopics = mindMapOptions.batchTopics
+      const batchSystemPrompt = `You are an expert mind map creator that generates rich, comprehensive visual knowledge maps from educational content.
+
+Your job: Generate one mind map per topic provided. Each mind map must faithfully represent the actual content and complexity of that topic as it appears in the source document.
+
+## How to decide the size and depth of each mind map
+- Read the document content carefully for each topic
+- The number of branches, children, and depth of nesting should reflect how much content actually exists for that topic in the document
+- A topic with many sub-concepts, examples, and details should produce a large, deep mind map
+- A topic with fewer points should produce a proportionally smaller map — but still meaningfully cover what's there
+- Never produce a map with just 2-3 nodes — if a topic was identified, there is enough content to map out properly
+- Nest deeper when the content has natural sub-categories (e.g., a branch about "Types" that has several distinct types, each with their own properties)
+
+## Node design
+- **Labels**: Concise 3-8 word phrases that capture the concept. Not single words, not full sentences.
+- **Details**: 1-3 sentences with specific facts, definitions, relationships, or examples drawn from the document. This is where the real learning value lives — be thorough.
+- **Emoji**: One meaningful emoji per node as a visual mnemonic for the concept.
+
+## Output format
+Output a JSON ARRAY of mind map objects:
+[
+  {
+    "title": "Descriptive Title for This Mind Map",
+    "centralTopic": "Core Concept (3-8 words)",
+    "branches": [
+      {
+        "id": "t1_b1",
+        "label": "Branch Label",
+        "detail": "Thorough explanation with facts from the document.",
+        "emoji": "🔬",
+        "children": [
+          {
+            "id": "t1_b1_1",
+            "label": "Sub-topic Label",
+            "detail": "Detailed explanation.",
+            "emoji": "📊",
+            "children": [
+              {
+                "id": "t1_b1_1_1",
+                "label": "Deeper concept",
+                "detail": "Specific detail or example.",
+                "emoji": "📌"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
+
+## Rules
+- One mind map per topic — cover that topic as completely as the document content allows
+- Every node MUST have: id, label, detail, emoji. Children array is optional (omit or use empty array for leaf nodes).
+- IDs must be globally unique across all maps (prefix with topic index: t1_b1, t1_b1_1, t2_b1, etc.)
+- Return ONLY the valid JSON array — no markdown, no code fences, no explanatory text before or after
+- Balance branches — spread content evenly rather than putting everything under one branch
+- Go as deep as the content naturally requires. If a branch has sub-categories that themselves have sub-points, nest them.`
+
+      const batchUserPrompt = `Document: "${documentTitle}"
+
+Topics to map (one mind map each):
+${batchTopics.map((t, i) => `${i + 1}. ${t}`).join('\n')}
+
+Source material:
+${documentContent.slice(0, 25000)}
+
+For each topic, read the source material and build a mind map that covers all the relevant concepts, sub-topics, relationships, and details present in the document for that topic. Let the document content dictate the size and depth — more content means a bigger map. Output the JSON array now.`
+
+      // Replace the prompts
+      systemPrompt = batchSystemPrompt as typeof systemPrompt
+      userPrompt = batchUserPrompt as typeof userPrompt
+      console.log(`[StudyTools] Batch mind map mode: generating ${batchTopics.length} focused maps`)
+    }
 
     console.log(`[StudyTools] Generating ${type} for "${documentTitle}" (${documentContent.length} chars)`)
 
@@ -746,33 +824,58 @@ export async function POST(req: NextRequest) {
     }
 
     // Special handling for mind-map - parse JSON response
+    // Count nodes helper
+    const countMindMapNodes = (nodes: Array<{ children?: unknown[] }>): number => {
+      let count = nodes.length
+      for (const node of nodes) {
+        if (Array.isArray(node.children)) {
+          count += countMindMapNodes(node.children as Array<{ children?: unknown[] }>)
+        }
+      }
+      return count
+    }
+
+    // Batch mind maps: multiple mindmaps generated in one LLM call
+    let batchMindMaps: Array<{ centralTopic: string; branches: unknown[]; title?: string; metadata?: { totalNodes: number; maxDepth: number } }> | null = null
+
     if (type === 'mind-map') {
       try {
         const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-        mindMapData = JSON.parse(cleanedText)
+        const parsed = JSON.parse(cleanedText)
 
-        if (!mindMapData.centralTopic || !Array.isArray(mindMapData.branches)) {
-          throw new Error('Mind map data missing required fields: centralTopic and branches')
-        }
+        // Check if response is a batch (array of mindmaps or object with mindmaps array)
+        const mindmapArray = Array.isArray(parsed) ? parsed
+          : parsed?.mindmaps && Array.isArray(parsed.mindmaps) ? parsed.mindmaps
+          : null
 
-        // Count total nodes
-        const countNodes = (nodes: Array<{ children?: unknown[] }>): number => {
-          let count = nodes.length
-          for (const node of nodes) {
-            if (Array.isArray(node.children)) {
-              count += countNodes(node.children as Array<{ children?: unknown[] }>)
+        if (mindmapArray && mindmapArray.length > 1 && mindmapArray[0]?.centralTopic) {
+          // Batch mode — multiple mindmaps in one response
+          const parsedBatch = mindmapArray.map((mm: Record<string, unknown>) => {
+            const branches = (mm.branches as unknown[]) || []
+            const totalNodes = countMindMapNodes(branches as Array<{ children?: unknown[] }>) + 1
+            return {
+              centralTopic: mm.centralTopic as string,
+              branches,
+              title: (mm.title as string) || (mm.centralTopic as string),
+              metadata: { totalNodes, maxDepth: mindMapOptions?.depth || 3 },
             }
+          })
+          batchMindMaps = parsedBatch
+          // Use first mindmap as the primary mindMapData for backward-compat response
+          mindMapData = parsedBatch[0]
+          console.log(`[StudyTools] Parsed ${parsedBatch.length} batch mind maps`)
+        } else {
+          // Single mind map
+          mindMapData = parsed
+          if (!mindMapData.centralTopic || !Array.isArray(mindMapData.branches)) {
+            throw new Error('Mind map data missing required fields: centralTopic and branches')
           }
-          return count
+          const totalNodes = countMindMapNodes(mindMapData.branches) + 1
+          if (!mindMapData.metadata) {
+            mindMapData.metadata = { totalNodes, maxDepth: mindMapOptions?.depth || 3 }
+          }
+          console.log(`[StudyTools] Successfully parsed mind map with ${totalNodes} nodes`)
         }
-        const totalNodes = countNodes(mindMapData.branches) + 1 // +1 for central node
-
-        // Ensure metadata exists
-        if (!mindMapData.metadata) {
-          mindMapData.metadata = { totalNodes, maxDepth: mindMapOptions?.depth || 3 }
-        }
-
-        console.log(`[StudyTools] Successfully parsed mind map with ${totalNodes} nodes`)
         processedContent = resultText
       } catch (error) {
         console.error('[StudyTools] Failed to parse mind map JSON:', error)
@@ -985,9 +1088,61 @@ export async function POST(req: NextRequest) {
       }
     } catch (saveError) {
       console.error('[StudyTools] Database save error:', saveError)
-      // Don't throw - return generated content even if save fails
-      // But signal that database save failed
       outputId = null
+    }
+
+    // For batch mind maps: save additional mind maps as separate outputs (first was already saved above)
+    const batchOutputIds: string[] = outputId ? [outputId] : []
+    if (batchMindMaps && batchMindMaps.length > 1) {
+      const resolvedDocumentId = saveDocumentId ?? null
+      const resolvedConversationId = validatedConversationId ?? null
+
+      for (let i = 1; i < batchMindMaps.length; i++) {
+        const mm = batchMindMaps[i]
+        try {
+          const batchPayload = {
+            title: mm.title || mm.centralTopic,
+            content: JSON.stringify(mm),
+            type,
+            documentId,
+            createdAt: new Date().toISOString(),
+            mindMapData: mm,
+            options: mindMapOptions,
+            metadata: {
+              model: modelUsed,
+              duration: generationDuration,
+              contentLength: JSON.stringify(mm).length,
+              sourceContentLength: documentContent.length,
+              totalNodes: mm.metadata?.totalNodes || 0,
+              maxDepth: mm.metadata?.maxDepth || 2,
+              batchIndex: i,
+              fallbackStrategy: modelUsed.includes('flash') ? 'applied' : 'none'
+            }
+          }
+          const { data: batchOutput, error: batchError } = await serviceSupabase
+            .from('outputs')
+            .insert({
+              section_id: null,
+              overall: true,
+              type: 'mind_map',
+              document_id: resolvedDocumentId,
+              conversation_id: resolvedConversationId,
+              payload: batchPayload,
+            })
+            .select('id')
+            .single()
+
+          if (!batchError && batchOutput) {
+            batchOutputIds.push(batchOutput.id)
+            console.log(`[StudyTools] Saved batch mind map ${i + 1}/${batchMindMaps.length}: ${batchOutput.id} — "${mm.centralTopic}"`)
+          } else {
+            console.error(`[StudyTools] Failed to save batch mind map ${i + 1}:`, batchError)
+          }
+        } catch (err) {
+          console.error(`[StudyTools] Batch save error ${i + 1}:`, err)
+        }
+      }
+      console.log(`[StudyTools] Batch complete: ${batchOutputIds.length}/${batchMindMaps.length} mind maps saved`)
     }
 
     return NextResponse.json({
@@ -1013,7 +1168,17 @@ export async function POST(req: NextRequest) {
       // Include mind-map-specific data in response
       ...(type === 'mind-map' && mindMapData ? {
         mindMapData,
-        options: mindMapOptions
+        options: mindMapOptions,
+        // Include all batch mind maps with their DB IDs so the client can add them to stores
+        ...(batchMindMaps && batchMindMaps.length > 1 ? {
+          batchMindMaps: batchMindMaps.map((mm, i) => ({
+            id: batchOutputIds[i] || crypto.randomUUID(),
+            title: mm.title || mm.centralTopic,
+            centralTopic: mm.centralTopic,
+            branches: mm.branches,
+            metadata: mm.metadata,
+          }))
+        } : {})
       } : {}),
       metadata: {
         generatedAt: new Date().toISOString(),

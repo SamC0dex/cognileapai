@@ -18,7 +18,7 @@ interface RecordUsageParams {
   inputTokens: number
   outputTokens: number
   totalTokens: number
-  source: 'chat' | 'study-tool'
+  source: 'chat' | 'study-tool' | 'active-recall'
   sourceId?: string
 }
 

@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (session) {
-      const results = [...(session.results as ReviewSessionResult[]), sessionResult]
+      const results = [...((session.results || []) as ReviewSessionResult[]), sessionResult]
       await supabase
         .from('review_sessions')
         .update({
