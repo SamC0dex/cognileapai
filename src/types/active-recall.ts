@@ -226,6 +226,7 @@ export interface DueCardsResponse {
   cards: ReviewCard[]
   totalDue: number
   dueByLayer: Record<RecallLayer, number>
+  smartMeta?: SmartScheduleMeta
 }
 
 export interface ReviewRequest {
@@ -508,4 +509,64 @@ export interface PlanActivity {
   cardCount: number
   notes: string
   completed: boolean
+}
+
+// ============================================
+// Adaptive Learning — Session Analysis
+// ============================================
+
+export interface SessionAnalysisInsights {
+  cardsAnalyzed: number
+  adjustments: SessionCardAdjustment[]
+  weakCards: Array<{ cardId: string; topic: string; reason: string }>
+  planAdapted: boolean
+  summary: string
+}
+
+export interface SessionCardAdjustment {
+  cardId: string
+  topic: string
+  multiplier: number
+  note: string
+  flagStuck: boolean
+}
+
+// ============================================
+// Adaptive Learning — Smart Scheduling
+// ============================================
+
+export interface SmartScheduleMeta {
+  topFocusTopics: Array<{ topic: string; cardCount: number; avgPriority: number }>
+  estimatedMinutes: number
+  cardsByUrgency: { critical: number; important: number; routine: number }
+}
+
+// ============================================
+// Adaptive Learning — Predictive Analytics
+// ============================================
+
+export interface PredictiveAnalytics {
+  retentionForecast: Array<{ date: string; avgRetention: number; cardsDue: number }>
+  topicMasteryTimelines: TopicMasteryTimeline[]
+  stuckCards: StuckCardInfo[]
+  learningVelocity: { cardsPerDay: number; avgAccuracy: number; trend: 'improving' | 'stable' | 'declining' }
+}
+
+export interface TopicMasteryTimeline {
+  topic: string
+  currentLayer: number
+  avgEaseFactor: number
+  estimatedMasteryDate: string
+  reviewsRemaining: number
+  currentAccuracy: number
+}
+
+export interface StuckCardInfo {
+  cardId: string
+  question: string
+  topic: string
+  layer: number
+  reviewCount: number
+  stuckSince: string
+  suggestion: string
 }

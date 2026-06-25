@@ -17,6 +17,7 @@ import { RecallLayer } from '@/types/active-recall'
 import type { ReviewSession } from '@/types/active-recall'
 import { AIGreetingCard } from './v2/ai-greeting-card'
 import { QuickStatsRow } from './v2/quick-stats-row'
+import { TodaysFocusCard } from './v2/todays-focus-card'
 import { EmptyStateOnboarding } from './v2/empty-state-onboarding'
 import { ActivePlanCard } from './v2/active-plan-card'
 
@@ -149,6 +150,9 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
         isLoading={isLoading}
         onStartReview={handleStartReview}
       />
+
+      {/* Today's Focus — Smart Scheduling */}
+      <TodaysFocusCard totalDue={dueToday} />
 
       {/* Quick Stats Pills */}
       <QuickStatsRow

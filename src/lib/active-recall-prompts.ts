@@ -442,3 +442,116 @@ Generate the adjusted remaining schedule as JSON.`
     { role: 'user', content: userContent },
   ]
 }
+
+// ============================================
+// Session Analysis — Per-Card Adaptive Adjustments
+// ============================================
+
+interface SessionAnalysisCardData {
+  cardId: string
+  topic: string
+  question: string
+  accuracy: number         // lifetime correct/total as %
+  lapseCount: number
+  avgResponseTimeMs: number
+  recallLayer: number      // 1-4
+  consecutiveCorrect: number
+  totalReviews: number
+  currentMultiplier: number
+  weaknessScore: number    // pre-computed 0-1
+  sessionRating: number    // 0-5 rating from this session
+  sessionResponseTimeMs: number
+}
+
+interface SessionAnalysisContext {
+  cards: SessionAnalysisCardData[]
+  sessionAccuracy: number   // overall session %
+  sessionCardsReviewed: number
+  sessionTimeMs: number
+  promotions: number
+  demotions: number
+}
+
+export function buildSessionAnalysisPrompt(ctx: SessionAnalysisContext): ChatMessage[] {
+  const system = `You are a learning analytics engine. Analyze a student's review session and return per-card interval adjustments.
+
+For each card, decide:
+- **multiplier** (0.5 to 2.0): how to adjust the card's review interval
+  - < 1.0 = review sooner (struggling cards)
+  - 1.0 = no change
+  - > 1.0 = review later (confident cards)
+- **note**: a short (1 sentence) explanation of why this adjustment was made — this is shown to the student
+- **flagStuck**: true if the card seems stuck (many reviews, no layer progress, low accuracy)
+
+Decision factors:
+- Low accuracy + high response time → needs more frequent review (multiplier 0.6-0.8)
+- High accuracy + fast response time → space out reviews (multiplier 1.2-1.5)
+- Multiple lapses → significantly increase frequency (multiplier 0.5-0.7)
+- Stuck at same layer for many reviews → flag as stuck, lower multiplier
+- Recently promoted → keep current interval (multiplier ~1.0)
+- Cards rated 0-1 in this session → definitely review sooner
+- Cards rated 4-5 with fast response → can be spaced out more
+
+Return ONLY a valid JSON array:
+[{ "cardId": "...", "multiplier": 1.0, "note": "...", "flagStuck": false }]
+
+Include ALL cards from the input. Be specific in notes — reference the actual numbers (accuracy, response time, lapses).`
+
+  const cardLines = ctx.cards.map((c) =>
+    `- id:${c.cardId} | topic:"${c.topic}" | q:"${c.question.slice(0, 60)}" | accuracy:${c.accuracy}% | lapses:${c.lapseCount} | avgTime:${c.avgResponseTimeMs}ms | layer:${c.recallLayer} | streak:${c.consecutiveCorrect} | reviews:${c.totalReviews} | currentMult:${c.currentMultiplier} | weakness:${c.weaknessScore.toFixed(2)} | sessionRating:${c.sessionRating} | sessionTime:${c.sessionResponseTimeMs}ms`
+  ).join('\n')
+
+  const userContent = `Session summary: ${ctx.sessionCardsReviewed} cards, ${ctx.sessionAccuracy}% accuracy, ${Math.round(ctx.sessionTimeMs / 1000)}s total, ${ctx.promotions} promotions, ${ctx.demotions} demotions.
+
+Cards reviewed:
+${cardLines}
+
+Analyze each card and return the JSON array of adjustments.`
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: userContent },
+  ]
+}
+
+// ============================================
+// Stuck Card Suggestions — AI Study Strategies
+// ============================================
+
+interface StuckCardData {
+  cardId: string
+  question: string
+  answer: string
+  topic: string
+  recallLayer: number
+  totalReviews: number
+  accuracy: number
+  avgResponseTimeMs: number
+  lapseCount: number
+}
+
+export function buildStuckCardSuggestionsPrompt(cards: StuckCardData[]): ChatMessage[] {
+  const system = `You are a learning coach. For each stuck flashcard (a card the student keeps failing despite multiple reviews), suggest a specific study strategy to help them finally learn it.
+
+Strategies can include:
+- Breaking the concept into smaller pieces
+- Creating a mnemonic or memory hook
+- Connecting it to something they already know
+- Suggesting they re-read the source material
+- Recommending they try explaining it out loud
+- Proposing a different angle to understand the concept
+
+Return ONLY a valid JSON array:
+[{ "cardId": "...", "suggestion": "..." }]
+
+Keep each suggestion to 1-2 sentences. Be specific to the actual question/answer content.`
+
+  const cardLines = cards.map((c) =>
+    `- id:${c.cardId} | topic:"${c.topic}" | question:"${c.question}" | answer:"${c.answer.slice(0, 100)}" | layer:${c.recallLayer} | reviews:${c.totalReviews} | accuracy:${c.accuracy}% | lapses:${c.lapseCount}`
+  ).join('\n')
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: `These cards are stuck — the student has reviewed them multiple times but can't progress:\n\n${cardLines}\n\nProvide a specific study strategy for each card.` },
+  ]
+}

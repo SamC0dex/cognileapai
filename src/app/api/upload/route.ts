@@ -3,9 +3,7 @@ import { createHash } from 'crypto'
 import { createClient } from '@/lib/supabase/server'
 import { supabase as serviceSupabase } from '@/lib/supabase'
 import PDFParser from 'pdf2json'
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const officeParser = require('officeparser') as { parseOfficeAsync: (input: Buffer) => Promise<string> }
+import { parseOffice } from 'officeparser'
 
 // TypeScript interfaces for PDF parser data structures
 interface PDFTextRun {
@@ -445,7 +443,8 @@ async function extractText(mimeType: string, buffer: Buffer): Promise<string> {
     return await extractPdfText(buffer)
   }
   if (OFFICE_MIMES.has(mimeType)) {
-    const text = await officeParser.parseOfficeAsync(buffer)
+    const ast = await parseOffice(buffer)
+    const text = ast.toText()
     return typeof text === 'string' ? text.trim() : ''
   }
   if (mimeType === 'text/plain' || mimeType === 'text/csv') {

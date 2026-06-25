@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const body: ReviewRequest = await req.json()
     const { cardId, rating, responseTimeMs, sessionId } = body
 
-    if (!cardId || rating === undefined || !sessionId) {
+    if (!cardId || rating === undefined || !sessionId || responseTimeMs === undefined) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
@@ -38,6 +38,8 @@ export async function POST(req: NextRequest) {
       easeFactor: card.ease_factor,
       intervalDays: card.interval_days,
       aiMultiplier: card.ai_interval_multiplier,
+      avgResponseTimeMs: card.average_response_time_ms,
+      difficulty: card.difficulty,
     })
 
     // Compute layer transition

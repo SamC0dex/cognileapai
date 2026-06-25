@@ -8,6 +8,7 @@ import type {
   ReviewUndoEntry,
   SM2Rating,
   SessionFeedback,
+  SessionAnalysisInsights,
 } from '@/types/active-recall'
 
 interface ReviewStoreState {
@@ -31,6 +32,10 @@ interface ReviewStoreState {
 
   // Results
   feedback: SessionFeedback | null
+
+  // Analysis
+  analysisStatus: 'idle' | 'analyzing' | 'complete' | 'error'
+  analysisInsights: SessionAnalysisInsights | null
 }
 
 interface ReviewStoreActions {
@@ -41,6 +46,7 @@ interface ReviewStoreActions {
   skipCard: () => void
   undoLastRating: () => Promise<void>
   endSession: () => Promise<void>
+  analyzeSession: () => Promise<void>
   fetchFeedback: () => Promise<void>
   reset: () => void
 
@@ -70,6 +76,8 @@ const initialState: ReviewStoreState = {
   isComplete: false,
   isLoadingFeedback: false,
   feedback: null,
+  analysisStatus: 'idle',
+  analysisInsights: null,
 }
 
 export const useReviewStore = create<ReviewStore>()((set, get) => ({
@@ -313,6 +321,36 @@ export const useReviewStore = create<ReviewStore>()((set, get) => ({
       })
     } catch (error) {
       console.error('[ReviewStore] End session error:', error)
+    }
+  },
+
+  analyzeSession: async () => {
+    const state = get()
+    if (!state.sessionId || state.ratings.length === 0) {
+      set({ analysisStatus: 'complete', analysisInsights: null })
+      return
+    }
+
+    set({ analysisStatus: 'analyzing' })
+
+    try {
+      const res = await fetch('/api/active-recall/analyze-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: state.sessionId }),
+        signal: AbortSignal.timeout(15000), // 15s timeout
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        set({ analysisStatus: 'complete', analysisInsights: data.insights || null })
+      } else {
+        console.error('[ReviewStore] Analysis failed:', res.status)
+        set({ analysisStatus: 'error', analysisInsights: null })
+      }
+    } catch (error) {
+      console.error('[ReviewStore] Analysis error:', error)
+      set({ analysisStatus: 'error', analysisInsights: null })
     }
   },
 

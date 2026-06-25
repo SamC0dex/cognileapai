@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { RecallLayer } from '@/types/active-recall'
-import type { DueCardsResponse } from '@/types/active-recall'
+import type { DueCardsResponse, SmartScheduleMeta } from '@/types/active-recall'
+import { computePriorityScore, interleaveByTopic, selectCardsForCapacity, categorizeByUrgency, getTopFocusTopics } from '@/lib/card-scheduler'
 
 export async function GET(req: NextRequest) {
   try {
@@ -20,6 +21,8 @@ export async function GET(req: NextRequest) {
     const sourceType = searchParams.get('source_type')
     const progressive = searchParams.get('progressive') === 'true'
     const includeAll = searchParams.get('include_all') === 'true'
+    const smart = searchParams.get('smart') === 'true'
+    const minutes = searchParams.get('minutes') ? parseInt(searchParams.get('minutes')!, 10) : null
 
     // Fetch due cards (next_review_at <= now), or all cards if include_all
     let query = supabase
@@ -101,13 +104,41 @@ export async function GET(req: NextRequest) {
       dueByLayer[card.recall_layer] = (dueByLayer[card.recall_layer] || 0) + 1
     }
 
+    // Smart scheduling: score → sort → interleave → capacity trim
+    let smartMeta: SmartScheduleMeta | undefined
+    if (smart && cards && cards.length > 0) {
+      const now = new Date()
+      const scored = cards.map((card) => ({
+        ...card,
+        priorityScore: computePriorityScore(card, now),
+      }))
+
+      // Sort by priority descending
+      scored.sort((a, b) => b.priorityScore - a.priorityScore)
+
+      // Interleave by topic
+      const interleaved = interleaveByTopic(scored)
+
+      // Capacity trim if minutes specified
+      const finalCards = minutes ? selectCardsForCapacity(interleaved, minutes) : interleaved
+
+      // Build metadata
+      smartMeta = {
+        topFocusTopics: getTopFocusTopics(scored),
+        estimatedMinutes: Math.ceil(finalCards.length * 0.5), // ~30s per card
+        cardsByUrgency: categorizeByUrgency(scored),
+      }
+
+      cards = finalCards
+    }
+
     const response: DueCardsResponse = {
       cards: cards || [],
       totalDue: totalDue || 0,
       dueByLayer: dueByLayer as Record<RecallLayer, number>,
     }
 
-    return NextResponse.json(response)
+    return NextResponse.json({ ...response, ...(smartMeta ? { smartMeta } : {}) })
   } catch (error) {
     console.error('[ActiveRecall] Due cards error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

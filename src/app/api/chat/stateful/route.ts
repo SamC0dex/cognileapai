@@ -150,7 +150,7 @@ export async function POST(req: NextRequest) {
     ]
 
     // Track token counts
-    let systemPromptTokens = Math.ceil(systemPrompt.length / 4)
+    const systemPromptTokens = Math.ceil(systemPrompt.length / 4)
     let documentContextTokens = 0
 
     // Add document context if any

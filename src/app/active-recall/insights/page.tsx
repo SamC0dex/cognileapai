@@ -1,10 +1,12 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import {
   BarChart3,
   TrendingUp,
+  TrendingDown,
+  Minus,
   Brain,
   Clock,
   Target,
@@ -12,13 +14,18 @@ import {
   ChevronUp,
   CheckCircle,
   XCircle,
+  Activity,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui'
 import { useActiveRecallStore } from '@/lib/active-recall-store'
 import { RecallLayer, RECALL_LAYER_LABELS } from '@/types/active-recall'
-import type { DocumentMastery, ReviewSession } from '@/types/active-recall'
+import type { DocumentMastery, ReviewSession, PredictiveAnalytics } from '@/types/active-recall'
 import { ForgettingCurveChart } from '@/components/active-recall/forgetting-curve-chart'
+import { RetentionForecastChart } from '@/components/active-recall/retention-forecast-chart'
+import { TopicMasteryTimeline } from '@/components/active-recall/topic-mastery-timeline'
+import { StuckCardsAlert } from '@/components/active-recall/stuck-cards-alert'
 import { WeeklyReportCard } from '@/components/active-recall/weekly-report-card'
 import { generateCurvePoints } from '@/lib/forgetting-curve'
 
@@ -30,10 +37,26 @@ export default function InsightsPage() {
   const { stats, masteryByDocument, fetchStats } = useActiveRecallStore()
   const [period, setPeriod] = useState<Period>('30d')
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
+  const [predictive, setPredictive] = useState<PredictiveAnalytics | null>(null)
+  const [predictiveLoading, setPredictiveLoading] = useState(true)
+
+  const fetchPredictive = useCallback(async () => {
+    setPredictiveLoading(true)
+    try {
+      const days = period === '7d' ? 7 : period === '90d' ? 90 : 30
+      const res = await fetch(`/api/active-recall/predictive-analytics?period=${days}`)
+      if (res.ok) {
+        const data: PredictiveAnalytics = await res.json()
+        setPredictive(data)
+      }
+    } catch { /* ignore */ }
+    setPredictiveLoading(false)
+  }, [period])
 
   useEffect(() => {
     fetchStats(period)
-  }, [fetchStats, period])
+    fetchPredictive()
+  }, [fetchStats, fetchPredictive, period])
 
   if (!stats) {
     return (
@@ -115,7 +138,71 @@ export default function InsightsPage() {
         <StatPill icon={Brain} label="Total Reviews" value={stats.totalReviews.toLocaleString()} color="text-blue-500" />
         <StatPill icon={TrendingUp} label="Mastery" value={`${Math.round(stats.masteryPct)}%`} color="text-purple-500" />
         <StatPill icon={BarChart3} label="Cards" value={stats.totalCards.toString()} color="text-orange-500" />
+        {predictive && (
+          <StatPill
+            icon={Activity}
+            label="Velocity"
+            value={`${predictive.learningVelocity.cardsPerDay}/day`}
+            color={
+              predictive.learningVelocity.trend === 'improving' ? 'text-green-500' :
+              predictive.learningVelocity.trend === 'declining' ? 'text-red-500' :
+              'text-muted-foreground'
+            }
+            suffix={
+              predictive.learningVelocity.trend === 'improving' ? <TrendingUp className="h-3 w-3 text-green-500" /> :
+              predictive.learningVelocity.trend === 'declining' ? <TrendingDown className="h-3 w-3 text-red-500" /> :
+              <Minus className="h-3 w-3 text-muted-foreground" />
+            }
+          />
+        )}
       </div>
+
+      {/* Predictive: Retention Forecast */}
+      {predictive && predictive.retentionForecast.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border bg-card p-5"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-purple-500" />
+              Retention Forecast
+            </h3>
+            {predictiveLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">
+            Predicted average memory retention across all cards over the next {period === '7d' ? '7' : period === '90d' ? '90' : '30'} days
+          </p>
+          <div className="overflow-x-auto">
+            <RetentionForecastChart data={predictive.retentionForecast} />
+          </div>
+        </motion.div>
+      )}
+
+      {/* Predictive: Topic Mastery Timelines */}
+      {predictive && predictive.topicMasteryTimelines.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="rounded-xl border bg-card p-5"
+        >
+          <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+            <Brain className="h-4 w-4 text-blue-500" />
+            Topic Mastery Timeline
+          </h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            Estimated time to reach mastery for each topic based on your learning pace
+          </p>
+          <TopicMasteryTimeline timelines={predictive.topicMasteryTimelines} />
+        </motion.div>
+      )}
+
+      {/* Predictive: Stuck Cards */}
+      {predictive && predictive.stuckCards.length > 0 && (
+        <StuckCardsAlert cards={predictive.stuckCards} />
+      )}
 
       {/* Forgetting Curves */}
       {chartCurves.length > 0 && (
@@ -356,18 +443,23 @@ function StatPill({
   label,
   value,
   color,
+  suffix,
 }: {
   icon: React.ComponentType<{ className?: string }>
   label: string
   value: string
   color: string
+  suffix?: React.ReactNode
 }) {
   return (
     <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
       <Icon className={cn('h-5 w-5', color)} />
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-lg font-semibold leading-tight">{value}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-lg font-semibold leading-tight">{value}</p>
+          {suffix}
+        </div>
       </div>
     </div>
   )

@@ -36,6 +36,7 @@ import { MindMapReviewCard } from '@/components/active-recall/v2/mindmap-review-
 import { LazyMindMapViewer } from '@/components/study-tools/lazy-mindmap-viewer'
 import type { SM2Rating, ReviewCard as ReviewCardType } from '@/types/active-recall'
 import type { MindMapSet } from '@/types/mindmap'
+import { SessionAnalysisCard } from '@/components/active-recall/session-analysis-card'
 
 export default function ReviewPage() {
   return (
@@ -64,9 +65,12 @@ function ReviewPageInner() {
     skipCard,
     undoLastRating,
     endSession,
+    analyzeSession,
     fetchFeedback,
     reset,
     canUndo,
+    analysisStatus,
+    analysisInsights,
   } = useReviewStore()
 
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -93,6 +97,7 @@ function ReviewPageInner() {
 
   const [initError, setInitError] = useState(false)
   const [isInitializing, setIsInitializing] = useState(true)
+  const [showSummary, setShowSummary] = useState(false)
   const initStartedRef = useRef(false)
 
   useEffect(() => {
@@ -252,6 +257,15 @@ function ReviewPageInner() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isActive, showAnswer, isRating, isComplete]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Trigger session analysis when session completes
+  const sessionEndTriggeredRef = useRef(false)
+  useEffect(() => {
+    if (isComplete && !sessionEndTriggeredRef.current) {
+      sessionEndTriggeredRef.current = true
+      handleSessionEnd()
+    }
+  }, [isComplete]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleClose = () => {
     // Navigate immediately — don't let React re-render with reset state
     window.location.href = '/active-recall'
@@ -265,6 +279,8 @@ function ReviewPageInner() {
 
   const handleSessionEnd = async () => {
     await endSession()
+    // Run analysis first (UI shows animated analysis card), then fetch coaching feedback
+    await analyzeSession()
     await fetchFeedback()
 
     // Mark matching plan activities as complete
@@ -375,8 +391,32 @@ function ReviewPageInner() {
     )
   }
 
-  // Session complete — show summary
+  // Session complete — show analysis card first, then summary
   if (isComplete) {
+    // Show analysis card while idle (waiting for effect), analyzing, or just completed (before user clicks continue)
+    if (!showSummary && (analysisStatus === 'idle' || analysisStatus === 'analyzing' || analysisStatus === 'complete')) {
+      return (
+        <SessionAnalysisCard
+          status={analysisStatus === 'idle' ? 'analyzing' : analysisStatus}
+          insights={analysisInsights}
+          cardsReviewed={ratings.length}
+          onContinue={() => setShowSummary(true)}
+        />
+      )
+    }
+
+    // Show error state briefly, then auto-continue to summary
+    if (analysisStatus === 'error' && !showSummary) {
+      return (
+        <SessionAnalysisCard
+          status="error"
+          insights={null}
+          cardsReviewed={ratings.length}
+          onContinue={() => setShowSummary(true)}
+        />
+      )
+    }
+
     return (
       <SessionSummaryV2
         ratings={ratings}
@@ -386,7 +426,7 @@ function ReviewPageInner() {
         isLoadingFeedback={isLoadingFeedback}
         streak={stats?.reviewStreak}
         onClose={handleClose}
-        onEndSession={handleSessionEnd}
+        analysisInsights={analysisInsights}
       />
     )
   }
@@ -1036,7 +1076,7 @@ function SessionSummaryV2({
   isLoadingFeedback,
   streak,
   onClose,
-  onEndSession,
+  analysisInsights,
 }: {
   ratings: import('@/types/active-recall').ReviewSessionResult[]
   totalCards: number
@@ -1045,12 +1085,8 @@ function SessionSummaryV2({
   isLoadingFeedback: boolean
   streak?: number
   onClose: () => void
-  onEndSession: () => void
+  analysisInsights?: import('@/types/active-recall').SessionAnalysisInsights | null
 }) {
-  useEffect(() => {
-    onEndSession()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   const correctCount = ratings.filter((r) => r.rating >= 3).length
   const accuracy = totalCards > 0 ? Math.round((correctCount / totalCards) * 100) : 0
   const totalTimeMs = startedAt ? Date.now() - startedAt.getTime() : 0
@@ -1113,6 +1149,22 @@ function SessionSummaryV2({
                 </div>
               )}
             </div>
+          )}
+
+          {/* Agent insights */}
+          {analysisInsights && analysisInsights.adjustments.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="mb-6 rounded-xl bg-purple-500/5 border border-purple-500/10 p-4"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Lightbulb className="h-4 w-4 text-purple-500" />
+                <span className="text-sm font-medium text-purple-700 dark:text-purple-400">Agent Adjustments</span>
+              </div>
+              <p className="text-xs text-muted-foreground">{analysisInsights.summary}</p>
+            </motion.div>
           )}
 
           {/* Actions */}

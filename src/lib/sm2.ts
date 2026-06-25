@@ -11,6 +11,8 @@ export interface SM2Input {
   easeFactor: number     // current ease factor (≥ 1.3)
   intervalDays: number   // current interval in days
   aiMultiplier?: number  // AI-computed override (default 1.0)
+  avgResponseTimeMs?: number  // average response time — slow = uncertainty, fast = confidence
+  difficulty?: string | null  // card difficulty level
 }
 
 export interface SM2Output {
@@ -32,7 +34,7 @@ export interface SM2Output {
  *   5 = Perfect response (Easy)
  */
 export function sm2(input: SM2Input): SM2Output {
-  const { quality, repetitions, easeFactor, intervalDays, aiMultiplier = 1.0 } = input
+  const { quality, repetitions, easeFactor, intervalDays, aiMultiplier = 1.0, avgResponseTimeMs, difficulty } = input
 
   let newReps: number
   let newEF: number
@@ -62,6 +64,22 @@ export function sm2(input: SM2Input): SM2Output {
 
   // Apply AI multiplier to interval
   newInterval = Math.round(newInterval * aiMultiplier * 100) / 100
+
+  // Apply response time adjustment (capped at ±10%)
+  if (avgResponseTimeMs !== undefined && quality >= 3) {
+    if (avgResponseTimeMs > 12000) {
+      // Slow response indicates uncertainty — review sooner
+      newInterval = Math.round(newInterval * 0.9 * 100) / 100
+    } else if (avgResponseTimeMs < 3000) {
+      // Fast confident response — can space out
+      newInterval = Math.round(newInterval * 1.05 * 100) / 100
+    }
+  }
+
+  // Apply difficulty adjustment on failures
+  if (difficulty === 'hard' && quality < 3) {
+    newEF = Math.max(1.3, newEF - 0.05)
+  }
 
   // Compute next review date
   const nextReviewAt = new Date()
