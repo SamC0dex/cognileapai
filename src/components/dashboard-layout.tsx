@@ -40,6 +40,20 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   }, [])
 
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const syncMobileSidebar = () => {
+      if (window.innerWidth < 768) {
+        setSidebarCollapsed(true)
+      }
+    }
+
+    syncMobileSidebar()
+    window.addEventListener('resize', syncMobileSidebar)
+    return () => window.removeEventListener('resize', syncMobileSidebar)
+  }, [])
+
   // Handle files panel toggle - allow coexistence with study tools panel
   const handleFilesPanelToggle = React.useCallback(() => {
     setIsFilesPanelOpen(prev => {
@@ -176,7 +190,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Main Content */}
         <main
           ref={mainRef}
-          className="flex-1 flex flex-col overflow-hidden"
+          className="flex-1 min-w-0 flex flex-col overflow-hidden"
           style={{
             marginLeft: getMainContentOffset(),
             transition: 'margin-left 0.15s cubic-bezier(0.25, 0.1, 0.25, 1)'

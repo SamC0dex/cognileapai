@@ -27,6 +27,7 @@ import {
   NotebookText,
   ScrollText,
   RotateCcw,
+  AlertCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -130,6 +131,50 @@ function activityUnit(type: string, count?: number): string {
   return n === 1 ? 'card' : 'cards'
 }
 
+function isActivityComplete(activity: Pick<PlanActivity, 'completed' | 'completionStatus'>): boolean {
+  return !!activity.completed || activity.completionStatus === 'completed'
+}
+
+function getActivityState(activity: PlanActivity) {
+  if (isActivityComplete(activity)) {
+    return {
+      label: 'Done',
+      className: 'bg-green-500/10 text-green-600 dark:text-green-400',
+      icon: <CheckCircle2 className="h-3 w-3" />,
+    }
+  }
+
+  if (activity.generationStatus === 'not_generated') {
+    return {
+      label: 'Needs material',
+      className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+      icon: <AlertCircle className="h-3 w-3" />,
+    }
+  }
+
+  if (activity.generationStatus === 'generating') {
+    return {
+      label: 'Generating',
+      className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+      icon: <Loader2 className="h-3 w-3 animate-spin" />,
+    }
+  }
+
+  if (activity.generationStatus === 'failed') {
+    return {
+      label: 'Blocked',
+      className: 'bg-red-500/10 text-red-600 dark:text-red-400',
+      icon: <AlertCircle className="h-3 w-3" />,
+    }
+  }
+
+  return {
+    label: 'Ready',
+    className: 'bg-primary/10 text-primary',
+    icon: <Play className="h-3 w-3" />,
+  }
+}
+
 export default function PlanDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
@@ -222,7 +267,7 @@ export default function PlanDetailPage() {
     if (!plan) return
     const dayEntry = plan.schedule.find(d => d.day === day)
     const activity = dayEntry?.activities[activityIndex]
-    const wasCompleted = !!activity?.completed || activity?.completionStatus === 'completed'
+    const wasCompleted = activity ? isActivityComplete(activity) : false
 
     // Optimistic update
     const newSchedule = plan.schedule.map(d => {
@@ -232,7 +277,7 @@ export default function PlanDetailPage() {
           ? { ...a, completed: !wasCompleted, completionStatus: !wasCompleted ? 'completed' as const : 'not_started' as const }
           : a
       )
-      return { ...d, activities: newActivities, isCompleted: newActivities.every(a => a.completed || a.completionStatus === 'completed') }
+      return { ...d, activities: newActivities, isCompleted: newActivities.every(isActivityComplete) }
     })
     const newCompleted = Math.max(0, (plan.completed_activities || 0) + (wasCompleted ? -1 : 1))
     setPlan({ ...plan, schedule: newSchedule, completed_activities: newCompleted })
@@ -287,7 +332,11 @@ export default function PlanDetailPage() {
   const progress = plan.total_activities > 0
     ? Math.round((plan.completed_activities / plan.total_activities) * 100)
     : 0
-  const daysRemaining = Math.max(0, plan.totalDays - plan.currentDay + 1)
+  const displayDay = Math.min(plan.currentDay, plan.totalDays || plan.currentDay)
+  const daysRemaining = Math.max(0, plan.totalDays - displayDay)
+  const todayDay = plan.schedule.find((day) => day.day === displayDay) || null
+  const todayIncomplete = todayDay?.activities.filter((activity) => !isActivityComplete(activity)) || []
+  const nextTodayActivity = todayIncomplete[0] || null
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -346,7 +395,7 @@ export default function PlanDetailPage() {
             <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Calendar className="h-3 w-3" />
-                Day {plan.currentDay} of {plan.totalDays}
+                Day {displayDay} of {plan.totalDays}
               </span>
               <span className="flex items-center gap-1">
                 <Target className="h-3 w-3" />
@@ -392,6 +441,59 @@ export default function PlanDetailPage() {
             </Button>
           </div>
         </div>
+      </div>
+
+      {/* Today's Plan */}
+      <div className="rounded-xl border bg-card p-5 space-y-4">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-primary" />
+              Today&apos;s Plan
+            </h2>
+            {nextTodayActivity ? (
+              <p className="text-xs text-muted-foreground mt-1">
+                Next: {ACTIVITY_CONFIG[nextTodayActivity.type]?.label || 'Activity'}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-1">
+                Today&apos;s planned activities are complete.
+              </p>
+            )}
+          </div>
+          {(stats?.dueCards || 0) > 0 && (
+            <Button
+              onClick={() => handleStartSession()}
+              variant="purple"
+              size="sm"
+              className="gap-2"
+            >
+              <Play className="h-3.5 w-3.5" />
+              Start Review
+              <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-[10px]">
+                {stats?.dueCards}
+              </span>
+            </Button>
+          )}
+        </div>
+
+        {todayDay ? (
+          <div className="space-y-2">
+            {todayDay.activities.map((activity, idx) => (
+              <ActivityRow
+                key={idx}
+                activity={activity}
+                isToday
+                onComplete={() => handleToggleActivity(todayDay.day, idx)}
+                onReview={() => handleStartSession(ACTIVITY_CONFIG[activity.type]?.reviewType, true)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            This plan has no scheduled activity for today.
+          </div>
+        )}
       </div>
 
       {/* Progress + Stats Bar */}
@@ -447,7 +549,7 @@ export default function PlanDetailPage() {
             const isToday = day.day === plan.currentDay
             const isPast = day.day < plan.currentDay
             const isExpanded = expandedDays.has(day.day)
-            const completedCount = day.activities.filter(a => a.completed || a.completionStatus === 'completed').length
+            const completedCount = day.activities.filter(isActivityComplete).length
             const totalCount = day.activities.length
 
             return (
@@ -490,7 +592,7 @@ export default function PlanDetailPage() {
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
                       {completedCount}/{totalCount} activities
-                      {totalCount > 0 && completedCount === totalCount && ' — Complete'}
+                      {totalCount > 0 && completedCount === totalCount && ' - Complete'}
                     </div>
                   </div>
 
@@ -537,7 +639,7 @@ export default function PlanDetailPage() {
                         ))}
 
                         {/* Start day's session */}
-                        {isToday && day.activities.some(a => !a.completed && a.completionStatus !== 'completed') && (
+                        {isToday && day.activities.some(a => !isActivityComplete(a)) && (
                           <Button
                             onClick={() => handleStartSession()}
                             variant="outline"
@@ -597,62 +699,69 @@ function ActivityRow({
   onReview: () => void
 }) {
   const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.flashcard_review
+  const isCompleted = isActivityComplete(activity)
+  const state = getActivityState(activity)
 
   return (
     <div className={cn(
-      'flex items-center gap-3 p-2.5 rounded-lg border transition-colors',
-      activity.completed || activity.completionStatus === 'completed'
+      'flex flex-col gap-2 p-2.5 rounded-lg border transition-colors sm:flex-row sm:items-center sm:gap-3',
+      isCompleted
         ? 'bg-muted/30 border-muted'
         : 'bg-card border-border hover:border-primary/20',
     )}>
-      {/* Completion checkbox */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onComplete() }}
-        className={cn(
-          'shrink-0 transition-colors',
-          activity.completed || activity.completionStatus === 'completed' ? 'text-green-500 hover:text-green-400' : 'text-muted-foreground/40 hover:text-muted-foreground',
-        )}
-      >
-        {activity.completed || activity.completionStatus === 'completed' ? (
-          <CheckCircle2 className="h-4.5 w-4.5" />
-        ) : (
-          <Circle className="h-4.5 w-4.5" />
-        )}
-      </button>
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        {/* Completion checkbox */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onComplete() }}
+          className={cn(
+            'mt-0.5 shrink-0 transition-colors',
+            isCompleted ? 'text-green-500 hover:text-green-400' : 'text-muted-foreground/40 hover:text-muted-foreground',
+          )}
+        >
+          {isCompleted ? (
+            <CheckCircle2 className="h-4.5 w-4.5" />
+          ) : (
+            <Circle className="h-4.5 w-4.5" />
+          )}
+        </button>
 
-      {/* Type badge */}
-      <span className={cn('flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium shrink-0', config.color)}>
-        {config.icon}
-        {config.label}
-      </span>
-
-      {/* Topic + info */}
-      <div className="flex-1 min-w-0">
-        <p className={cn('text-sm truncate', (activity.completed || activity.completionStatus === 'completed') && 'line-through text-muted-foreground')}>
-          {activity.topic}
-        </p>
-        {activity.notes && (
-          <p className="text-xs text-muted-foreground truncate mt-0.5">{activity.notes}</p>
-        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn('flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium shrink-0', config.color)}>
+              {config.icon}
+              {config.label}
+            </span>
+            <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium', state.className)}>
+              {state.icon}
+              {state.label}
+            </span>
+          </div>
+          <p className={cn('mt-1 text-sm truncate', isCompleted && 'line-through text-muted-foreground')}>
+            {activity.topic}
+          </p>
+          {activity.notes && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">{activity.notes}</p>
+          )}
+        </div>
       </div>
 
-      {/* Count */}
-      <span className="text-xs text-muted-foreground shrink-0">
-        {activity.cardCount ?? activity.plannedMinutes} {activityUnit(activity.type, activity.cardCount ?? activity.plannedMinutes)}
-      </span>
+      <div className="flex items-center justify-between gap-2 pl-7 sm:pl-0">
+        <span className="text-xs text-muted-foreground shrink-0">
+          {activity.cardCount ?? activity.plannedMinutes} {activityUnit(activity.type, activity.cardCount ?? activity.plannedMinutes)}
+        </span>
 
-      {/* Review button */}
-      {isToday && config.reviewType && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={(e) => { e.stopPropagation(); onReview() }}
-          className="shrink-0 h-7 px-2.5 text-xs gap-1"
-        >
-          <Play className="h-3 w-3" />
-          {activity.completed || activity.completionStatus === 'completed' ? 'Revisit' : 'Review'}
-        </Button>
-      )}
+        {isToday && config.reviewType && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => { e.stopPropagation(); onReview() }}
+            className="shrink-0 h-7 px-2.5 text-xs gap-1"
+          >
+            <Play className="h-3 w-3" />
+            {isCompleted ? 'Revisit' : 'Review'}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

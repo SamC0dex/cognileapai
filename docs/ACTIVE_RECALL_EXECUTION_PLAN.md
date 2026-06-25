@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Modules 1-2 verified; checkpoint commit required before Module 3
+Status: Module 3 verified; checkpoint commit required before Module 4
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -181,26 +181,28 @@ Goal: make the agent create useful personalized plans from document context and 
 
 ## Module 3: Dashboard And Today's Plan
 
+Status: Complete
+
 Goal: make the Active Recall dashboard show exactly what the user should do next.
 
 ### Tasks
 
-- [ ] Audit `ActiveRecallDashboard`, `ActivePlanCard`, and today's plan routes.
-- [ ] Show today's planned activities in a clear sequence.
-- [ ] Show whether each activity is not generated, ready, completed, or blocked.
-- [ ] Add a clear "Generate today's material" or per-activity generation action.
-- [ ] Do not show advanced analytics as the primary call to action.
-- [ ] Make empty state guide the user to select a document and chat with the agent.
+- [x] Audit `ActiveRecallDashboard`, `ActivePlanCard`, and today's plan routes.
+- [x] Show today's planned activities in a clear sequence.
+- [x] Show whether each activity is not generated, ready, completed, or blocked.
+- [x] Add a clear "Generate today's material" or per-activity generation action.
+- [x] Do not show advanced analytics as the primary call to action.
+- [x] Make empty state guide the user to select a document and chat with the agent.
 
 ### Verification Gate
 
-- [ ] A user can tell what to do today within 5 seconds.
-- [ ] Empty state does not imply Active Recall is only manual flashcards.
-- [ ] Today's activity state persists after reload.
-- [ ] Typecheck passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] A user can tell what to do today within 5 seconds.
+- [x] Empty state does not imply Active Recall is only manual flashcards.
+- [x] Today's activity state persists after reload.
+- [x] Typecheck passes.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
 
 ## Module 4: On-Demand Material Generation
 
@@ -498,3 +500,9 @@ Each module should end with a small, reviewable commit after verification.
 - UI/UX protocol added.
   - UI/UX quality is now a required module gate for user-facing changes.
   - Visual consistency, smooth workflows, responsive layout, loading/empty/error states, and thematic fit must be verified before checkpoint commits.
+- Module 3 completed.
+  - Dashboard plan cards now clamp stale current-day display, show ordered today's activities when available, and expose clear next actions for due review or material preparation.
+  - Plan detail now has a dedicated Today's Plan section before analytics/progress, with activity state chips for ready, needs material, generating, blocked, and done.
+  - Active Recall layout now avoids mobile document overflow by collapsing the app sidebar on narrow viewports and constraining the route header/tab layout.
+  - Verification: `pnpm typecheck` passed; `pnpm lint` passed with existing warnings.
+  - User-flow/UI verification: authenticated dashboard and plan detail were tested in browser on desktop and 390px mobile viewport; today's plan rendered after reload, stale day overflow was gone, and mobile document scroll width matched viewport width.

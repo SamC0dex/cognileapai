@@ -52,6 +52,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const currentDay = Math.max(1, Math.floor((today.getTime() - planCreated.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    const displayCurrentDay = Math.min(currentDay, schedule.length || currentDay)
 
     // Get card counts per source type for this plan
     let { data: cards } = await supabase
@@ -128,7 +129,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       plan: {
         ...plan,
         schedule,
-        currentDay,
+        currentDay: displayCurrentDay,
         totalDays: schedule.length,
       },
       stats: {

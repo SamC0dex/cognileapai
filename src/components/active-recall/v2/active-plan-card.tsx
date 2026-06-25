@@ -14,6 +14,7 @@ import {
   NotebookText,
   ScrollText,
   RotateCcw,
+  AlertCircle,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -59,6 +60,8 @@ interface TodayData {
       topic: string
       cardCount?: number
       plannedMinutes?: number
+      generationStatus?: string
+      generatedSourceId?: string | null
       notes: string
       completed?: boolean
       completionStatus?: string
@@ -179,6 +182,10 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
     : 0
 
   const dueTotal = todayData?.dueCards.total || 0
+  const todayActivities = todayData?.today?.activities || []
+  const incompleteActivities = todayActivities.filter((activity) => !isActivityComplete(activity))
+  const needsMaterial = todayActivities.some((activity) => activity.generationStatus === 'not_generated')
+  const nextActivity = incompleteActivities[0]
 
   return (
     <>
@@ -283,11 +290,25 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
               Loading today&apos;s plan...
             </div>
           ) : todayData?.today ? (
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground mb-2">Today&apos;s Focus</p>
-              {todayData.today.activities.slice(0, 3).map((activity, idx) => (
-                <ActivityRow key={idx} activity={activity} />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium text-muted-foreground">Today&apos;s Plan</p>
+                {nextActivity ? (
+                  <span className="text-[10px] text-primary font-medium truncate">
+                    Next: {getActivityLabel(nextActivity.type)}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-green-600 dark:text-green-400 font-medium">Complete</span>
+                )}
+              </div>
+              {todayActivities.slice(0, 4).map((activity, idx) => (
+                <ActivityRow key={idx} activity={activity} order={idx + 1} />
               ))}
+              {todayActivities.length > 4 && (
+                <p className="text-[11px] text-muted-foreground">
+                  +{todayActivities.length - 4} more in the full plan
+                </p>
+              )}
             </div>
           ) : dueTotal > 0 ? (
             <div className="space-y-1.5">
@@ -300,8 +321,8 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
             </p>
           )}
 
-          {/* Start Session CTA */}
-          {dueTotal > 0 && (
+          {/* Next action */}
+          {dueTotal > 0 ? (
             <Button
               onClick={handleStartSession}
               variant="purple"
@@ -314,7 +335,17 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
                 {dueTotal}
               </span>
             </Button>
-          )}
+          ) : needsMaterial || nextActivity ? (
+            <Button
+              onClick={handleCardClick}
+              variant="outline"
+              size="sm"
+              className="w-full mt-3 gap-2"
+            >
+              {needsMaterial ? <AlertCircle className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {needsMaterial ? 'Prepare Today&apos;s Material' : 'Open Today&apos;s Plan'}
+            </Button>
+          ) : null}
         </div>
       </motion.div>
 
@@ -346,16 +377,19 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
 
 function ActivityRow({
   activity,
+  order,
 }: {
   activity: {
     type: string
     topic: string
     cardCount?: number
     plannedMinutes?: number
+    generationStatus?: string
     notes: string
     completed?: boolean
     completionStatus?: string
   }
+  order: number
 }) {
   const typeConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
     study_guide: {
@@ -411,7 +445,8 @@ function ActivityRow({
   }
 
   const config = typeConfig[activity.type] || typeConfig.flashcard_review
-  const isCompleted = activity.completed || activity.completionStatus === 'completed'
+  const isCompleted = isActivityComplete(activity)
+  const state = getActivityState(activity)
   const count = activity.cardCount ?? activity.plannedMinutes
   const unit = activity.cardCount
     ? activity.type === 'mindmap' || activity.type === 'mindmap_review'
@@ -422,7 +457,13 @@ function ActivityRow({
     : activity.plannedMinutes === 1 ? 'minute' : 'minutes'
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex items-center gap-2 text-xs min-w-0">
+      <span className={cn(
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+        isCompleted ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-muted text-muted-foreground',
+      )}>
+        {order}
+      </span>
       <span className={cn('flex items-center gap-1 px-1.5 py-0.5 rounded-md font-medium', config.color)}>
         {config.icon}
         {config.label}
@@ -435,8 +476,66 @@ function ActivityRow({
           {count} {unit}
         </span>
       ) : null}
+      <span className={cn('hidden sm:inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium', state.className)}>
+        {state.label}
+      </span>
     </div>
   )
+}
+
+function isActivityComplete(activity: { completed?: boolean; completionStatus?: string }) {
+  return !!activity.completed || activity.completionStatus === 'completed'
+}
+
+function getActivityLabel(type: string) {
+  const labels: Record<string, string> = {
+    study_guide: 'Study Guide',
+    summary: 'Summary',
+    smart_notes: 'Smart Notes',
+    mindmap: 'Mind Map',
+    flashcards: 'Flashcards',
+    quiz: 'Quiz',
+    review_due_cards: 'Due Review',
+    flashcard_review: 'Flashcards',
+    quiz_session: 'Quiz',
+    mindmap_review: 'Mind Map',
+  }
+  return labels[type] || 'Activity'
+}
+
+function getActivityState(activity: { completed?: boolean; completionStatus?: string; generationStatus?: string }) {
+  if (isActivityComplete(activity)) {
+    return {
+      label: 'Done',
+      className: 'bg-green-500/10 text-green-600 dark:text-green-400',
+    }
+  }
+
+  if (activity.generationStatus === 'not_generated') {
+    return {
+      label: 'Needs material',
+      className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    }
+  }
+
+  if (activity.generationStatus === 'generating') {
+    return {
+      label: 'Generating',
+      className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+    }
+  }
+
+  if (activity.generationStatus === 'failed') {
+    return {
+      label: 'Blocked',
+      className: 'bg-red-500/10 text-red-600 dark:text-red-400',
+    }
+  }
+
+  return {
+    label: 'Ready',
+    className: 'bg-primary/10 text-primary',
+  }
 }
 
 function DueCardsSummary({ byType, total }: { byType: Record<string, number>; total: number }) {

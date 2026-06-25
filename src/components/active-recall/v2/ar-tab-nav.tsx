@@ -15,7 +15,7 @@ export function ARTabNav() {
   const pathname = usePathname()
 
   return (
-    <nav className="flex items-center gap-1 border-b border-border px-6 overflow-x-auto scrollbar-none">
+    <nav className="flex w-full min-w-0 max-w-full items-center gap-1 overflow-x-auto border-b border-border px-3 scrollbar-none sm:px-6">
       {tabs.map((tab) => {
         const isActive =
           tab.href === '/active-recall'

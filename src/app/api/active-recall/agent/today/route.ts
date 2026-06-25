@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
     const todayDate = new Date()
     todayDate.setHours(0, 0, 0, 0)
     const currentDay = Math.max(1, Math.floor((todayDate.getTime() - planCreatedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    const displayCurrentDay = Math.min(currentDay, schedule.length || currentDay)
 
     // Find today's schedule — try date match first, then day number, then index fallback
     const today = new Date().toISOString().split('T')[0]
@@ -68,7 +69,7 @@ export async function GET(req: NextRequest) {
         id: plan.id,
         title: plan.title,
         status: plan.status,
-        currentDay,
+        currentDay: displayCurrentDay,
         totalDays: schedule.length,
         totalActivities: plan.total_activities,
         completedActivities: plan.completed_activities,
