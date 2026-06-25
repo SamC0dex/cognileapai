@@ -23,6 +23,10 @@ import {
   Circle,
   BarChart3,
   Clock,
+  BookOpen,
+  NotebookText,
+  ScrollText,
+  RotateCcw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -36,22 +40,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui'
-
-interface PlanActivity {
-  type: 'flashcard_review' | 'quiz_session' | 'mindmap_review'
-  sourceSetId?: string
-  topic: string
-  cardCount: number
-  notes: string
-  completed: boolean
-}
-
-interface PlanScheduleDay {
-  day: number
-  date: string
-  activities: PlanActivity[]
-  isCompleted?: boolean
-}
+import type { PlanActivity, PlanScheduleDay } from '@/types/active-recall'
 
 interface PlanDetail {
   id: string
@@ -74,7 +63,45 @@ interface PlanStats {
   cardsByLayer: Record<string, number>
 }
 
-const ACTIVITY_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string; reviewType: string }> = {
+const ACTIVITY_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string; reviewType?: string }> = {
+  study_guide: {
+    icon: <BookOpen className="h-3.5 w-3.5" />,
+    label: 'Study Guide',
+    color: 'text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border-indigo-200 dark:border-indigo-800',
+  },
+  summary: {
+    icon: <ScrollText className="h-3.5 w-3.5" />,
+    label: 'Summary',
+    color: 'text-sky-600 dark:text-sky-400 bg-sky-500/10 border-sky-200 dark:border-sky-800',
+  },
+  smart_notes: {
+    icon: <NotebookText className="h-3.5 w-3.5" />,
+    label: 'Smart Notes',
+    color: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-200 dark:border-amber-800',
+  },
+  mindmap: {
+    icon: <TreePine className="h-3.5 w-3.5" />,
+    label: 'Mind Map',
+    color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-200 dark:border-emerald-800',
+    reviewType: 'mindmap',
+  },
+  flashcards: {
+    icon: <FileText className="h-3.5 w-3.5" />,
+    label: 'Flashcards',
+    color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-200 dark:border-blue-800',
+    reviewType: 'flashcard',
+  },
+  quiz: {
+    icon: <FlaskConical className="h-3.5 w-3.5" />,
+    label: 'Quiz',
+    color: 'text-violet-600 dark:text-violet-400 bg-violet-500/10 border-violet-200 dark:border-violet-800',
+    reviewType: 'quiz',
+  },
+  review_due_cards: {
+    icon: <RotateCcw className="h-3.5 w-3.5" />,
+    label: 'Due Review',
+    color: 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-200 dark:border-rose-800',
+  },
   flashcard_review: {
     icon: <FileText className="h-3.5 w-3.5" />,
     label: 'Flashcards',
@@ -97,8 +124,9 @@ const ACTIVITY_CONFIG: Record<string, { icon: React.ReactNode; label: string; co
 
 function activityUnit(type: string, count?: number): string {
   const n = count ?? 2 // default plural
-  if (type === 'mindmap_review') return n === 1 ? 'mind map' : 'mind maps'
-  if (type === 'quiz_session') return n === 1 ? 'question' : 'questions'
+  if (type === 'mindmap' || type === 'mindmap_review') return n === 1 ? 'mind map' : 'mind maps'
+  if (type === 'quiz' || type === 'quiz_session') return n === 1 ? 'question' : 'questions'
+  if (type === 'study_guide' || type === 'summary' || type === 'smart_notes') return n === 1 ? 'minute' : 'minutes'
   return n === 1 ? 'card' : 'cards'
 }
 
@@ -193,15 +221,18 @@ export default function PlanDetailPage() {
   const handleToggleActivity = async (day: number, activityIndex: number) => {
     if (!plan) return
     const dayEntry = plan.schedule.find(d => d.day === day)
-    const wasCompleted = !!dayEntry?.activities[activityIndex]?.completed
+    const activity = dayEntry?.activities[activityIndex]
+    const wasCompleted = !!activity?.completed || activity?.completionStatus === 'completed'
 
     // Optimistic update
     const newSchedule = plan.schedule.map(d => {
       if (d.day !== day) return d
       const newActivities = d.activities.map((a, i) =>
-        i === activityIndex ? { ...a, completed: !wasCompleted } : a
+        i === activityIndex
+          ? { ...a, completed: !wasCompleted, completionStatus: !wasCompleted ? 'completed' as const : 'not_started' as const }
+          : a
       )
-      return { ...d, activities: newActivities, isCompleted: newActivities.every(a => a.completed) }
+      return { ...d, activities: newActivities, isCompleted: newActivities.every(a => a.completed || a.completionStatus === 'completed') }
     })
     const newCompleted = Math.max(0, (plan.completed_activities || 0) + (wasCompleted ? -1 : 1))
     setPlan({ ...plan, schedule: newSchedule, completed_activities: newCompleted })
@@ -416,7 +447,7 @@ export default function PlanDetailPage() {
             const isToday = day.day === plan.currentDay
             const isPast = day.day < plan.currentDay
             const isExpanded = expandedDays.has(day.day)
-            const completedCount = day.activities.filter(a => a.completed).length
+            const completedCount = day.activities.filter(a => a.completed || a.completionStatus === 'completed').length
             const totalCount = day.activities.length
 
             return (
@@ -506,7 +537,7 @@ export default function PlanDetailPage() {
                         ))}
 
                         {/* Start day's session */}
-                        {isToday && day.activities.some(a => !a.completed) && (
+                        {isToday && day.activities.some(a => !a.completed && a.completionStatus !== 'completed') && (
                           <Button
                             onClick={() => handleStartSession()}
                             variant="outline"
@@ -570,7 +601,7 @@ function ActivityRow({
   return (
     <div className={cn(
       'flex items-center gap-3 p-2.5 rounded-lg border transition-colors',
-      activity.completed
+      activity.completed || activity.completionStatus === 'completed'
         ? 'bg-muted/30 border-muted'
         : 'bg-card border-border hover:border-primary/20',
     )}>
@@ -579,10 +610,10 @@ function ActivityRow({
         onClick={(e) => { e.stopPropagation(); onComplete() }}
         className={cn(
           'shrink-0 transition-colors',
-          activity.completed ? 'text-green-500 hover:text-green-400' : 'text-muted-foreground/40 hover:text-muted-foreground',
+          activity.completed || activity.completionStatus === 'completed' ? 'text-green-500 hover:text-green-400' : 'text-muted-foreground/40 hover:text-muted-foreground',
         )}
       >
-        {activity.completed ? (
+        {activity.completed || activity.completionStatus === 'completed' ? (
           <CheckCircle2 className="h-4.5 w-4.5" />
         ) : (
           <Circle className="h-4.5 w-4.5" />
@@ -597,7 +628,7 @@ function ActivityRow({
 
       {/* Topic + info */}
       <div className="flex-1 min-w-0">
-        <p className={cn('text-sm truncate', activity.completed && 'line-through text-muted-foreground')}>
+        <p className={cn('text-sm truncate', (activity.completed || activity.completionStatus === 'completed') && 'line-through text-muted-foreground')}>
           {activity.topic}
         </p>
         {activity.notes && (
@@ -607,11 +638,11 @@ function ActivityRow({
 
       {/* Count */}
       <span className="text-xs text-muted-foreground shrink-0">
-        {activity.cardCount} {activityUnit(activity.type)}
+        {activity.cardCount ?? activity.plannedMinutes} {activityUnit(activity.type, activity.cardCount ?? activity.plannedMinutes)}
       </span>
 
       {/* Review button */}
-      {isToday && (
+      {isToday && config.reviewType && (
         <Button
           variant="outline"
           size="sm"
@@ -619,7 +650,7 @@ function ActivityRow({
           className="shrink-0 h-7 px-2.5 text-xs gap-1"
         >
           <Play className="h-3 w-3" />
-          {activity.completed ? 'Revisit' : 'Review'}
+          {activity.completed || activity.completionStatus === 'completed' ? 'Revisit' : 'Review'}
         </Button>
       )}
     </div>

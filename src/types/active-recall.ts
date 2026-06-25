@@ -490,6 +490,10 @@ export interface AgentStudyPlan {
 export interface AgentOnboardingContext {
   goal: 'exam_prep' | 'understanding' | 'review' | 'custom'
   timeline?: string
+  deadline?: string
+  dailyAvailableMinutes?: number
+  currentUnderstanding?: 'new' | 'some_exposure' | 'comfortable' | 'advanced'
+  preferredIntensity?: 'light' | 'standard' | 'intensive'
   priorKnowledge: 'new' | 'some_exposure' | 'refreshing'
   selectedToolIds?: string[]
   notes?: string
@@ -502,12 +506,49 @@ export interface PlanScheduleDay {
   isCompleted?: boolean
 }
 
+export const PLAN_ACTIVITY_TYPES = [
+  'study_guide',
+  'summary',
+  'smart_notes',
+  'mindmap',
+  'flashcards',
+  'quiz',
+  'review_due_cards',
+] as const
+
+export type PlanActivityType = typeof PLAN_ACTIVITY_TYPES[number]
+
+// Kept so saved V3 plans made before Module 1 continue to load.
+export type LegacyPlanActivityType = 'flashcard_review' | 'quiz_session' | 'mindmap_review'
+
+export type PlanActivityGenerationStatus =
+  | 'not_required'
+  | 'not_generated'
+  | 'generating'
+  | 'ready'
+  | 'failed'
+
+export type PlanActivityCompletionStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'completed'
+  | 'skipped'
+
 export interface PlanActivity {
-  type: 'flashcard_review' | 'quiz_session' | 'mindmap_review'
-  sourceSetId: string
+  id?: string
+  type: PlanActivityType | LegacyPlanActivityType
+  documentId?: string
   topic: string
-  cardCount: number
+  plannedMinutes: number
+  generationStatus: PlanActivityGenerationStatus
+  generatedSourceId: string | null
+  generatedSourceType?: 'output' | 'flashcard_set' | 'quiz_set' | 'mindmap_set' | 'review_cards' | null
+  completionStatus: PlanActivityCompletionStatus
   notes: string
+
+  // Legacy fields used by existing saved schedules and review-focused UI.
+  sourceSetId?: string | null
+  cardCount?: number
   completed: boolean
 }
 

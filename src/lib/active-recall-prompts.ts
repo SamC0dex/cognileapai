@@ -285,9 +285,9 @@ Available actions:
    Use this after generating tools to add them to spaced repetition.
 
 4. **Create a study plan:**
-   <!--ACTION:CREATE_PLAN:{"title":"...","documentIds":["<uuid>"],"goal":"exam_prep|understanding|review","durationDays":7,"timeline":"2026-04-03","priorKnowledge":"new|some_exposure|refreshing"}-->
+   <!--ACTION:CREATE_PLAN:{"title":"...","documentIds":["<uuid>"],"goal":"exam_prep|understanding|review","durationDays":7,"timeline":"2026-04-03","deadline":"2026-04-03","dailyAvailableMinutes":45,"currentUnderstanding":"new|some_exposure|comfortable|advanced","preferredIntensity":"light|standard|intensive","priorKnowledge":"new|some_exposure|refreshing"}-->
    Use this after onboarding to create a structured multi-tool study plan.
-   **IMPORTANT**: ALWAYS include "durationDays" (number of days for the plan). If the user says "7 days", set durationDays to 7. If they give an exam date, calculate the days from today. Also set "timeline" to the target date (YYYY-MM-DD format). Both fields should be set.
+   **IMPORTANT**: ALWAYS include "durationDays" (number of days for the plan), "dailyAvailableMinutes", "currentUnderstanding", and "preferredIntensity". If the user gives an exam date, calculate the days from today and set both "timeline" and "deadline" to the target date (YYYY-MM-DD format).
 
 5. **Start a review session:**
    <!--ACTION:START_REVIEW:{"planId":"<uuid>"}-->
@@ -295,6 +295,14 @@ Available actions:
 
 ## ONBOARDING FLOW
 When a student wants to study something new, follow this flow:
+
+Module 2 checklist before creating a plan:
+- Confirm the selected document or documents.
+- Capture the user's goal: exam prep, deep understanding, quick review, or custom.
+- Capture deadline/exam date or number of days, plus daily available study minutes.
+- Capture current understanding: new, some_exposure, comfortable, or advanced.
+- Capture preferred intensity: light, standard, or intensive.
+- Create the plan even if not all study material exists yet; the plan should schedule on-demand generation.
 
 1. **Identify the subject** — Ask what they want to study. If they mention a document, check what tools exist.
 2. **Understand their goal** — Ask: exam prep, deep understanding, or quick review?
@@ -384,7 +392,21 @@ export interface PlanAdaptationContext {
   planTitle: string
   currentDay: number
   totalDays: number
-  remainingSchedule: Array<{ day: number; date: string; activities: Array<{ type: string; topic: string; cardCount: number; notes: string }> }>
+  remainingSchedule: Array<{
+    day: number
+    date: string
+    activities: Array<{
+      type: string
+      documentId?: string
+      topic: string
+      plannedMinutes?: number
+      cardCount?: number
+      generationStatus?: string
+      generatedSourceId?: string | null
+      completionStatus?: string
+      notes: string
+    }>
+  }>
   topicPerformance: Array<{
     topic: string
     accuracy: number
@@ -404,20 +426,23 @@ export function buildPlanAdaptationPrompt(ctx: PlanAdaptationContext): ChatMessa
 Rules:
 - Increase card counts and frequency for weak topics (accuracy < 65%)
 - Decrease card counts for mastered topics (accuracy > 90%), but don't remove them entirely
-- If overall accuracy is low (< 50%), simplify: more flashcard review, fewer quizzes
-- If overall accuracy is high (> 85%), intensify: more quizzes, add variety
+- If overall accuracy is low (< 50%), simplify: more summaries/study guides/flashcards, fewer quizzes
+- If overall accuracy is high (> 85%), intensify: more quizzes and review_due_cards, add variety
 - Keep daily card totals between 15-50
-- Preserve the progressive learning model: mindmap → flashcard → quiz
-- activity type must be one of: flashcard_review, quiz_session, mindmap_review
+- Preserve the progressive learning model: Learn -> Practice -> Remember
+- activity type must be one of: study_guide, summary, smart_notes, mindmap, flashcards, quiz, review_due_cards
+- Every activity must include: type, documentId, topic, plannedMinutes, generationStatus, generatedSourceId, completionStatus, notes
 - Return ONLY a valid JSON array of the adjusted remaining schedule days
-- Each day: { "day": N, "date": "YYYY-MM-DD", "activities": [{ "type": "...", "topic": "...", "cardCount": N, "notes": "..." }] }`
+- Use cardCount only for flashcards, quiz, and review_due_cards
+- Do not invent generatedSourceId values; preserve existing values where present and otherwise use null
+- Each day: { "day": N, "date": "YYYY-MM-DD", "activities": [{ "type": "...", "documentId": "...", "topic": "...", "plannedMinutes": N, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "..." }] }`
 
   const topicData = ctx.topicPerformance.map((t) =>
     `- ${t.topic}: accuracy=${t.accuracy}%, reviews=${t.totalReviews}, avgTime=${t.avgResponseTimeMs}ms, cards=${t.cardCount}`
   ).join('\n')
 
   const schedulePreview = ctx.remainingSchedule.slice(0, 5).map((d) =>
-    `  Day ${d.day} (${d.date}): ${d.activities.map((a) => `${a.type}:${a.topic}(${a.cardCount})`).join(', ')}`
+    `  Day ${d.day} (${d.date}): ${d.activities.map((a) => `${a.type}:${a.topic}(${a.cardCount ?? a.plannedMinutes ?? 0})`).join(', ')}`
   ).join('\n')
 
   const userContent = `Adapt this study plan based on performance:

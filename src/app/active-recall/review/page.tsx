@@ -286,11 +286,11 @@ function ReviewPageInner() {
     // Mark matching plan activities as complete
     if (planId && cards.length > 0) {
       const completedTypes = [...new Set(cards.map(c => {
-        if (c.source_type === 'flashcard') return 'flashcard_review'
-        if (c.source_type === 'quiz') return 'quiz_session'
-        if (c.source_type === 'mindmap') return 'mindmap_review'
+        if (c.source_type === 'flashcard') return ['flashcards', 'flashcard_review']
+        if (c.source_type === 'quiz') return ['quiz', 'quiz_session']
+        if (c.source_type === 'mindmap') return ['mindmap', 'mindmap_review']
         return null
-      }).filter(Boolean))]
+      }).flat().filter(Boolean))]
       if (completedTypes.length > 0) {
         fetch(`/api/active-recall/agent/plans/${planId}`, {
           method: 'PATCH',

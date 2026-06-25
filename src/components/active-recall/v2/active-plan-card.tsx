@@ -10,6 +10,10 @@ import {
   FileText,
   FlaskConical,
   TreePine,
+  BookOpen,
+  NotebookText,
+  ScrollText,
+  RotateCcw,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -50,7 +54,15 @@ interface TodayData {
   today: {
     day: number
     date: string
-    activities: { type: string; topic: string; cardCount: number; notes: string; completed?: boolean }[]
+    activities: {
+      type: string
+      topic: string
+      cardCount?: number
+      plannedMinutes?: number
+      notes: string
+      completed?: boolean
+      completionStatus?: string
+    }[]
   } | null
   dueCards: {
     total: number
@@ -332,8 +344,55 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
   )
 }
 
-function ActivityRow({ activity }: { activity: { type: string; topic: string; cardCount: number; notes: string; completed?: boolean } }) {
+function ActivityRow({
+  activity,
+}: {
+  activity: {
+    type: string
+    topic: string
+    cardCount?: number
+    plannedMinutes?: number
+    notes: string
+    completed?: boolean
+    completionStatus?: string
+  }
+}) {
   const typeConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
+    study_guide: {
+      icon: <BookOpen className="h-3 w-3" />,
+      label: 'Study Guide',
+      color: 'text-indigo-600 dark:text-indigo-400 bg-indigo-500/10',
+    },
+    summary: {
+      icon: <ScrollText className="h-3 w-3" />,
+      label: 'Summary',
+      color: 'text-sky-600 dark:text-sky-400 bg-sky-500/10',
+    },
+    smart_notes: {
+      icon: <NotebookText className="h-3 w-3" />,
+      label: 'Smart Notes',
+      color: 'text-amber-600 dark:text-amber-400 bg-amber-500/10',
+    },
+    mindmap: {
+      icon: <TreePine className="h-3 w-3" />,
+      label: 'Mind Map',
+      color: 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10',
+    },
+    flashcards: {
+      icon: <FileText className="h-3 w-3" />,
+      label: 'Flashcards',
+      color: 'text-blue-600 dark:text-blue-400 bg-blue-500/10',
+    },
+    quiz: {
+      icon: <FlaskConical className="h-3 w-3" />,
+      label: 'Quiz',
+      color: 'text-violet-600 dark:text-violet-400 bg-violet-500/10',
+    },
+    review_due_cards: {
+      icon: <RotateCcw className="h-3 w-3" />,
+      label: 'Due Review',
+      color: 'text-rose-600 dark:text-rose-400 bg-rose-500/10',
+    },
     flashcard_review: {
       icon: <FileText className="h-3 w-3" />,
       label: 'Flashcards',
@@ -352,6 +411,15 @@ function ActivityRow({ activity }: { activity: { type: string; topic: string; ca
   }
 
   const config = typeConfig[activity.type] || typeConfig.flashcard_review
+  const isCompleted = activity.completed || activity.completionStatus === 'completed'
+  const count = activity.cardCount ?? activity.plannedMinutes
+  const unit = activity.cardCount
+    ? activity.type === 'mindmap' || activity.type === 'mindmap_review'
+      ? activity.cardCount === 1 ? 'mind map' : 'mind maps'
+      : activity.type === 'quiz' || activity.type === 'quiz_session'
+        ? activity.cardCount === 1 ? 'question' : 'questions'
+        : activity.cardCount === 1 ? 'card' : 'cards'
+    : activity.plannedMinutes === 1 ? 'minute' : 'minutes'
 
   return (
     <div className="flex items-center gap-2 text-xs">
@@ -359,12 +427,14 @@ function ActivityRow({ activity }: { activity: { type: string; topic: string; ca
         {config.icon}
         {config.label}
       </span>
-      <span className={cn('text-muted-foreground truncate', activity.completed && 'line-through')}>
+      <span className={cn('text-muted-foreground truncate', isCompleted && 'line-through')}>
         {activity.topic}
       </span>
-      <span className="text-muted-foreground ml-auto shrink-0">
-        {activity.cardCount} {activity.type === 'mindmap_review' ? (activity.cardCount === 1 ? 'mind map' : 'mind maps') : activity.type === 'quiz_session' ? (activity.cardCount === 1 ? 'question' : 'questions') : (activity.cardCount === 1 ? 'card' : 'cards')}
-      </span>
+      {count ? (
+        <span className="text-muted-foreground ml-auto shrink-0">
+          {count} {unit}
+        </span>
+      ) : null}
     </div>
   )
 }

@@ -5,6 +5,22 @@ import type { MindMapData } from '@/types/mindmap'
 
 type Params = { params: Promise<{ id: string }> }
 
+function activityMatchesCompletedTypes(activityType: string, completedTypes: string[]) {
+  if (completedTypes.includes(activityType)) return true
+
+  const equivalents: Record<string, string[]> = {
+    flashcards: ['flashcard_review', 'flashcards'],
+    flashcard_review: ['flashcard_review', 'flashcards'],
+    quiz: ['quiz_session', 'quiz'],
+    quiz_session: ['quiz_session', 'quiz'],
+    mindmap: ['mindmap_review', 'mindmap'],
+    mindmap_review: ['mindmap_review', 'mindmap'],
+    review_due_cards: ['review_due_cards', 'flashcard_review', 'quiz_session', 'mindmap_review', 'flashcards', 'quiz', 'mindmap'],
+  }
+
+  return (equivalents[activityType] || []).some((type) => completedTypes.includes(type))
+}
+
 // GET /api/active-recall/agent/plans/[id] — full plan with schedule
 export async function GET(req: NextRequest, { params }: Params) {
   try {
@@ -196,7 +212,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
       const wasCompleted = !!dayEntry.activities[activityIndex].completed
       dayEntry.activities[activityIndex].completed = !wasCompleted
-      dayEntry.isCompleted = dayEntry.activities.every((a: { completed: boolean }) => a.completed)
+      dayEntry.activities[activityIndex].completionStatus = !wasCompleted ? 'completed' : 'not_started'
+      dayEntry.isCompleted = dayEntry.activities.every((a: { completed?: boolean; completionStatus?: string }) =>
+        a.completed || a.completionStatus === 'completed'
+      )
 
       const completedActivities = Math.max(0, (plan.completed_activities || 0) + (wasCompleted ? -1 : 1))
       const allPlanDone = schedule.every((d: { isCompleted?: boolean }) => d.isCompleted)
@@ -247,8 +266,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
       let updated = 0
       for (const activity of dayEntry.activities) {
-        if (!activity.completed && completedTypes.includes(activity.type)) {
+        if (!activity.completed && activity.completionStatus !== 'completed' && activityMatchesCompletedTypes(activity.type, completedTypes)) {
           activity.completed = true
+          activity.completionStatus = 'completed'
           updated++
         }
       }
@@ -257,7 +277,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         return NextResponse.json({ success: true, updated: 0 })
       }
 
-      dayEntry.isCompleted = dayEntry.activities.every((a: { completed: boolean }) => a.completed)
+      dayEntry.isCompleted = dayEntry.activities.every((a: { completed?: boolean; completionStatus?: string }) =>
+        a.completed || a.completionStatus === 'completed'
+      )
       const completedActivities = (plan.completed_activities || 0) + updated
       const allPlanDone = schedule.every((d: { isCompleted?: boolean }) => d.isCompleted)
 
