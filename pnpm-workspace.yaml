@@ -1,0 +1,12 @@
+packages:
+  - .
+
+overrides:
+  brace-expansion: "1.1.13"
+  flatted: "3.4.2"
+  js-yaml: "5.1.0"
+  postcss: "8.5.15"
+
+peerDependencyRules:
+  allowedVersions:
+    tailwindcss: "3.4.19"
