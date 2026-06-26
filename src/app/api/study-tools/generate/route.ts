@@ -357,6 +357,9 @@ interface StudyToolGenerateRequest {
   type: StudyToolPromptType
   documentId?: string
   conversationId?: string
+  planId?: string
+  planDay?: number
+  activityIndex?: number
   // Flashcard-specific options
   flashcardOptions?: {
     numberOfCards: 'fewer' | 'standard' | 'more'
@@ -389,6 +392,117 @@ interface Message {
   created_at: string
 }
 
+async function syncGeneratedPlanActivity(params: {
+  userId: string
+  planId?: string
+  planDay?: number
+  activityIndex?: number
+  outputId: string | null
+  type: StudyToolPromptType
+  documentId?: string
+  flashcardData: Array<{ id: string; question: string; answer: string; topic?: string; difficulty?: 'easy' | 'medium' | 'hard' }> | null
+  quizData: Array<{ id: string; question: string; options: string[]; correctAnswer: number; explanation?: string; topic?: string; difficulty?: 'easy' | 'medium' | 'hard' }> | null
+}) {
+  const { userId, planId, planDay, activityIndex, outputId, type, documentId, flashcardData, quizData } = params
+  if (!planId || typeof planDay !== 'number' || typeof activityIndex !== 'number' || !outputId) return null
+
+  const cards = type === 'flashcards' && flashcardData?.length
+    ? flashcardData.map((card) => ({
+        sourceType: 'flashcard',
+        sourceId: card.id,
+        question: card.question,
+        answer: card.answer,
+        options: null as string[] | null,
+        correctAnswer: null as number | null,
+        topic: card.topic || null,
+        difficulty: card.difficulty || null,
+      }))
+    : type === 'quiz' && quizData?.length
+      ? quizData.map((question) => ({
+          sourceType: 'quiz',
+          sourceId: question.id,
+          question: question.question,
+          answer: `${question.options[question.correctAnswer]}${question.explanation ? `\n\n${question.explanation}` : ''}`,
+          options: question.options,
+          correctAnswer: question.correctAnswer,
+          topic: question.topic || null,
+          difficulty: question.difficulty || null,
+        }))
+      : []
+
+  if (cards.length === 0) return null
+
+  let synced = 0
+  for (const card of cards) {
+    const { error } = await serviceSupabase
+      .from('review_cards')
+      .upsert(
+        {
+          user_id: userId,
+          source_type: card.sourceType,
+          source_id: card.sourceId,
+          source_set_id: outputId,
+          document_id: documentId || null,
+          plan_id: planId,
+          question: card.question,
+          answer: card.answer,
+          options: card.options,
+          correct_answer: card.correctAnswer,
+          topic: card.topic,
+          difficulty: card.difficulty,
+        },
+        { onConflict: 'user_id,source_type,source_id', ignoreDuplicates: true }
+      )
+    if (!error) synced++
+  }
+
+  await serviceSupabase
+    .from('review_cards')
+    .update({ plan_id: planId })
+    .eq('user_id', userId)
+    .eq('source_set_id', outputId)
+
+  const { count } = await serviceSupabase
+    .from('review_cards')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('plan_id', planId)
+    .eq('source_set_id', outputId)
+
+  const { data: plan, error: planError } = await serviceSupabase
+    .from('agent_study_plans')
+    .select('schedule')
+    .eq('id', planId)
+    .eq('user_id', userId)
+    .single()
+
+  if (planError || !plan) throw new Error('Generated cards synced, but plan activity could not be updated')
+
+  const schedule = typeof plan.schedule === 'string' ? JSON.parse(plan.schedule) : plan.schedule
+  const dayEntry = schedule.find((day: { day: number }) => day.day === planDay)
+  const activity = dayEntry?.activities?.[activityIndex]
+  if (!activity) throw new Error('Generated cards synced, but plan activity was not found')
+
+  activity.generationStatus = 'ready'
+  activity.generatedSourceId = outputId
+  activity.generatedSourceType = type === 'quiz' ? 'quiz_set' : 'flashcard_set'
+  activity.cardCount = count || cards.length
+
+  const { error: updateError } = await serviceSupabase
+    .from('agent_study_plans')
+    .update({ schedule, updated_at: new Date().toISOString() })
+    .eq('id', planId)
+    .eq('user_id', userId)
+
+  if (updateError) throw new Error('Generated cards synced, but plan activity update failed')
+
+  return {
+    sourceType: type === 'quiz' ? 'quiz' : 'flashcard',
+    synced,
+    total: count || cards.length,
+  }
+}
+
 export async function POST(req: NextRequest) {
   let type: StudyToolPromptType | undefined
   let documentId: string | undefined
@@ -397,6 +511,9 @@ export async function POST(req: NextRequest) {
   let quizOptions: StudyToolGenerateRequest['quizOptions']
   let mindMapOptions: StudyToolGenerateRequest['mindMapOptions']
   let generationId: string | undefined
+  let planId: string | undefined
+  let planDay: number | undefined
+  let activityIndex: number | undefined
 
   try {
     // Authenticate user first
@@ -420,6 +537,9 @@ export async function POST(req: NextRequest) {
     flashcardOptions = requestData.flashcardOptions
     quizOptions = requestData.quizOptions
     mindMapOptions = requestData.mindMapOptions
+    planId = requestData.planId
+    planDay = requestData.planDay
+    activityIndex = requestData.activityIndex
 
     // Debug logging
     console.log('[StudyTools] API Request received:', { type, documentId, conversationId })
@@ -1145,6 +1265,18 @@ For each topic, read the source material and build a mind map that covers all th
       console.log(`[StudyTools] Batch complete: ${batchOutputIds.length}/${batchMindMaps.length} mind maps saved`)
     }
 
+    const activeRecallSync = await syncGeneratedPlanActivity({
+      userId: user.id,
+      planId,
+      planDay,
+      activityIndex,
+      outputId,
+      type,
+      documentId: saveDocumentId,
+      flashcardData,
+      quizData,
+    })
+
     return NextResponse.json({
       success: true,
       id: outputId,
@@ -1155,6 +1287,7 @@ For each topic, read the source material and build a mind map that covers all th
       conversationId: validatedConversationId,
       // Signal if database save failed
       savedToDatabase: outputId !== null,
+      activeRecallSync,
       // Include flashcard-specific data in response
       ...(type === 'flashcards' && flashcardData ? {
         cards: flashcardData,

@@ -21,6 +21,14 @@ function activityMatchesCompletedTypes(activityType: string, completedTypes: str
   return (equivalents[activityType] || []).some((type) => completedTypes.includes(type))
 }
 
+function planHasExplicitGenerationState(schedule: Array<{ activities?: Array<{ generationStatus?: unknown }> }>) {
+  return schedule.some((day) =>
+    (day.activities || []).some((activity) =>
+      activity.generationStatus !== undefined && activity.generationStatus !== null
+    )
+  )
+}
+
 // GET /api/active-recall/agent/plans/[id] — full plan with schedule
 export async function GET(req: NextRequest, { params }: Params) {
   try {
@@ -45,6 +53,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     const schedule = typeof plan.schedule === 'string'
       ? JSON.parse(plan.schedule)
       : plan.schedule
+    const isOnDemandPlan = planHasExplicitGenerationState(schedule)
 
     // Calculate current day
     const planCreated = new Date(plan.created_at)
@@ -61,8 +70,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       .eq('user_id', user.id)
       .eq('plan_id', id)
 
-    // Auto-sync: if plan has 0 cards but documents have outputs, sync them now
-    if ((!cards || cards.length === 0) && plan.document_ids?.length) {
+    // Legacy auto-sync: old plans predate activity generation state and expected
+    // existing document material to attach automatically. New on-demand plans must
+    // not pull in unrelated old cards before the user generates an activity.
+    if (!isOnDemandPlan && (!cards || cards.length === 0) && plan.document_ids?.length) {
       console.log(`[PlanDetail] Plan ${id} has 0 cards, attempting auto-sync for docs: ${plan.document_ids}`)
       try {
         // Sync mindmaps from outputs
@@ -236,6 +247,70 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         return NextResponse.json({ error: 'Failed to update activity' }, { status: 500 })
       }
       return NextResponse.json({ success: true, completedActivities, planCompleted: allPlanDone, toggled: !wasCompleted })
+    }
+
+    if (action === 'update_activity_generation') {
+      const {
+        day,
+        activityIndex,
+        generationStatus,
+        generatedSourceId,
+        generatedSourceType,
+        cardCount,
+      } = body as {
+        day: number
+        activityIndex: number
+        generationStatus?: string
+        generatedSourceId?: string | null
+        generatedSourceType?: string | null
+        cardCount?: number
+      }
+
+      const allowedStatuses = new Set(['not_required', 'not_generated', 'generating', 'ready', 'failed'])
+      if (generationStatus && !allowedStatuses.has(generationStatus)) {
+        return NextResponse.json({ error: 'Invalid generation status' }, { status: 400 })
+      }
+
+      const schedule = typeof plan.schedule === 'string'
+        ? JSON.parse(plan.schedule)
+        : plan.schedule.map((d: Record<string, unknown>) => ({
+            ...d,
+            activities: Array.isArray(d.activities)
+              ? d.activities.map((activity) => ({ ...activity }))
+              : [],
+          }))
+
+      const dayEntry = schedule.find((d: { day: number }) => d.day === day)
+      if (!dayEntry || !dayEntry.activities[activityIndex]) {
+        return NextResponse.json({ error: 'Activity not found' }, { status: 400 })
+      }
+
+      const activity = dayEntry.activities[activityIndex]
+      if (generationStatus) activity.generationStatus = generationStatus
+      if (Object.prototype.hasOwnProperty.call(body, 'generatedSourceId')) {
+        activity.generatedSourceId = generatedSourceId ?? null
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'generatedSourceType')) {
+        activity.generatedSourceType = generatedSourceType ?? null
+      }
+      if (typeof cardCount === 'number' && Number.isFinite(cardCount)) {
+        activity.cardCount = Math.max(0, Math.round(cardCount))
+      }
+
+      const { error } = await supabase
+        .from('agent_study_plans')
+        .update({
+          schedule,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('user_id', user.id)
+
+      if (error) {
+        return NextResponse.json({ error: 'Failed to update activity generation' }, { status: 500 })
+      }
+
+      return NextResponse.json({ success: true, activity })
     }
 
     if (action === 'complete_session') {

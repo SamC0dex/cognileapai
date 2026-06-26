@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 3 verified; checkpoint commit required before Module 4
+Status: Module 4 checkpoint complete; ready for Module 5
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -206,27 +206,46 @@ Goal: make the Active Recall dashboard show exactly what the user should do next
 
 ## Module 4: On-Demand Material Generation
 
+Status: Complete
+
 Goal: generate only the material needed for today's activities, reducing cost and setup time.
 
 ### Tasks
 
-- [ ] Connect each activity type to existing study tool generation where possible.
-- [ ] Generate material for one selected activity or today's due set.
-- [ ] Save generated material source ids back to the plan activity.
-- [ ] Sync flashcards and quizzes to review cards after generation.
-- [ ] Add or verify mind map sync only if mind map activity is enabled.
-- [ ] Handle generation failure with a retry state.
+- [x] Connect each activity type to existing study tool generation where possible.
+- [x] Generate material for one selected activity or today's due set.
+- [x] Save generated material source ids back to the plan activity.
+- [x] Sync flashcards and quizzes to review cards after generation.
+- [x] Add or verify mind map sync only if mind map activity is enabled.
+- [x] Handle generation failure with a retry state.
 
 ### Verification Gate
 
-- [ ] User can generate today's flashcards from a plan activity.
-- [ ] User can generate today's quiz from a plan activity.
-- [ ] Generated flashcards/quizzes appear in Active Recall review when appropriate.
-- [ ] Existing material is reused instead of regenerated accidentally.
-- [ ] Typecheck passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] User can generate today's flashcards from a plan activity.
+- [x] User can generate today's quiz from a plan activity.
+- [x] Generated flashcards/quizzes appear in Active Recall review when appropriate.
+- [x] Existing ready material is reused instead of regenerated accidentally.
+- [x] Pending material is not hidden behind old due-card review actions.
+- [x] New on-demand plans do not auto-link unrelated old generated cards on plan detail load.
+- [x] Failed or provider-blocked generation returns the activity to a visible Retry state.
+- [x] Typecheck passes.
+- [x] User-flow/browser verification completed for ready, pending, generating, and blocked states.
+- [x] UI/UX review completed for ready, pending, generating, and blocked states.
+- [x] Module checkpoint commit created.
+
+### Module 4 Verification Notes
+
+- Implemented per-activity generation on plan detail rows using the existing study tool generator, plan activity generation-state persistence, and Active Recall sync for flashcards, quizzes, and mind maps.
+- Browser-tested an existing ready plan at `/active-recall/plan/ffaec381-fad1-40a9-9303-4519e5d246ca`: ready activities now show Review/Revisit actions, not Generate, and the page loads without runtime errors.
+- Created a controlled smoke-test plan at `/active-recall/plan/271fd123-ab16-47dd-956b-7bd7c30da976` with pending flashcard and quiz activities. Dashboard showed `Needs material` rows and the primary `Prepare Today's Material` CTA.
+- Browser-tested flashcard and quiz Generate actions. Both entered disabled `Generating` state correctly, then the configured Kie provider returned `403 Your request was blocked`; both activities recovered to `Blocked` with `Retry`.
+- Provider health checks confirmed Kie returns 403 when the Gemini endpoint receives an OpenAI SDK body with a `model` field, but succeeds with Kie's documented model-in-URL request shape. Updated Kie/Gemini non-streaming requests to call Kie directly with content-array messages and no `model` field in the body.
+- Moved plan activity review-card sync into `/api/study-tools/generate` when the request includes `planId`, `planDay`, and `activityIndex`, so a successful generation now atomically saves material, links review cards to the plan, and updates the activity to `ready`.
+- Re-tested the smoke plan after the Kie fix in the in-app browser. Flashcards and quiz both entered disabled `Generating`, completed to `Ready`, exposed `Review` actions, and updated plan stats.
+- Database verification for smoke plan `271fd123-ab16-47dd-956b-7bd7c30da976`: flashcard activity ready with source `41a9ef9e-3a5c-409d-99e7-a41d2c2a6d2c`, quiz activity ready with source `ddfb0f79-f96c-4bb6-97a1-0a009d92150a`, 16 review cards attached to the plan (`10` flashcard, `6` quiz), 12 currently due.
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
+- Fixed the smoke-test issues found during browser verification: generating rows no longer expose Review prematurely, pending on-demand plans no longer auto-link unrelated old document cards, and empty/blocked plans no longer show a misleading start-session CTA.
+- Keep old generated material as legacy-valid review content during MVP hardening. Do not remove it until the full Active Recall flow is stable and there is a deliberate migration/removal module near the end.
 
 ## Module 5: Review Loop Stabilization
 

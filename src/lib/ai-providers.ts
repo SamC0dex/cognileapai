@@ -111,6 +111,67 @@ function createOpenAIClient(provider: AIProvider, apiKey: string, model?: string
   })
 }
 
+function messageContentForProvider(provider: AIProvider, content: string) {
+  if (provider === 'kie' || provider === 'gemini') {
+    return [{ type: 'text', text: content }]
+  }
+  return content
+}
+
+function flattenMessages(messages: ChatMessage[]): string {
+  return messages
+    .map((message) => message.content)
+    .join('\n\n')
+}
+
+async function generateKieCompletion(
+  config: UserAIConfig,
+  options: GenerateOptions
+): Promise<CompletionResult> {
+  const response = await fetch(`${PROVIDERS.kie.baseUrl}/${config.model}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: flattenMessages(options.messages) }],
+        },
+      ],
+      max_tokens: options.maxTokens || 4096,
+      temperature: options.temperature ?? 0.7,
+      stream: false,
+    }),
+  })
+
+  const responseText = await response.text()
+  if (!response.ok) {
+    throw new Error(`${response.status} ${responseText || response.statusText}`)
+  }
+
+  let data: Record<string, unknown>
+  try {
+    data = JSON.parse(responseText)
+  } catch {
+    throw new Error('AI provider returned unparseable response')
+  }
+
+  const choices = data.choices as Array<{ message?: { content?: string } }> | undefined
+  const usage = data.usage ? {
+    promptTokens: (data.usage as Record<string, number>).prompt_tokens ?? 0,
+    completionTokens: (data.usage as Record<string, number>).completion_tokens ?? 0,
+    totalTokens: (data.usage as Record<string, number>).total_tokens ?? 0,
+  } : null
+
+  return {
+    text: choices?.[0]?.message?.content || '',
+    usage,
+  }
+}
+
 /**
  * Generate a chat completion using the user's chosen provider (non-streaming)
  */
@@ -118,19 +179,25 @@ export async function generateCompletion(
   config: UserAIConfig,
   options: GenerateOptions
 ): Promise<CompletionResult> {
+  if (config.provider === 'kie' || config.provider === 'gemini') {
+    return generateKieCompletion(config, options)
+  }
+
   // All providers use OpenAI-compatible API (including Kie.ai for Gemini models)
   const client = createOpenAIClient(config.provider, config.apiKey, config.model)
 
-  let response = await client.chat.completions.create({
+  const requestBody = {
     model: config.model,
     messages: options.messages.map(m => ({
       role: m.role,
-      content: m.content,
+      content: messageContentForProvider(config.provider, m.content),
     })),
     max_tokens: options.maxTokens || 4096,
     temperature: options.temperature ?? 0.7,
     stream: false,
-  }) as unknown as Record<string, unknown>
+  }
+
+  let response = await client.chat.completions.create(requestBody as never) as unknown as Record<string, unknown>
 
   // Kie.ai sometimes returns raw JSON string instead of parsed object
   if (typeof response === 'string') {

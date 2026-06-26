@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
+import { toast } from 'sonner'
 import {
   ArrowLeft,
   Play,
@@ -42,6 +43,9 @@ import {
   AlertDialogCancel,
 } from '@/components/ui'
 import type { PlanActivity, PlanScheduleDay } from '@/types/active-recall'
+import type { FlashcardEntry } from '@/types/flashcards'
+import type { QuizQuestionEntry } from '@/types/quiz'
+import type { MindMapData } from '@/types/mindmap'
 
 interface PlanDetail {
   id: string
@@ -62,6 +66,36 @@ interface PlanStats {
   dueCards: number
   cardsByType: Record<string, number>
   cardsByLayer: Record<string, number>
+}
+
+type StudyToolGenerateType = 'study-guide' | 'smart-summary' | 'smart-notes' | 'flashcards' | 'quiz' | 'mind-map'
+
+interface GeneratedStudyToolResponse {
+  success: boolean
+  id?: string | null
+  title?: string
+  type: StudyToolGenerateType
+  documentId?: string
+  content?: string
+  cards?: FlashcardEntry[]
+  questions?: QuizQuestionEntry[]
+  mindMapData?: MindMapData
+  options?: unknown
+  activeRecallSync?: {
+    sourceType: string
+    synced: number
+    total: number
+  } | null
+  metadata?: {
+    generatedAt?: string
+    duration?: number
+    model?: string
+    sourceContentLength?: number
+    totalCards?: number
+    totalQuestions?: number
+    totalNodes?: number
+    maxDepth?: number
+  }
 }
 
 const ACTIVITY_CONFIG: Record<string, { icon: React.ReactNode; label: string; color: string; reviewType?: string }> = {
@@ -129,6 +163,94 @@ function activityUnit(type: string, count?: number): string {
   if (type === 'quiz' || type === 'quiz_session') return n === 1 ? 'question' : 'questions'
   if (type === 'study_guide' || type === 'summary' || type === 'smart_notes') return n === 1 ? 'minute' : 'minutes'
   return n === 1 ? 'card' : 'cards'
+}
+
+function studyToolTypeForActivity(type: string): StudyToolGenerateType | null {
+  const mapping: Record<string, StudyToolGenerateType> = {
+    study_guide: 'study-guide',
+    summary: 'smart-summary',
+    smart_notes: 'smart-notes',
+    mindmap: 'mind-map',
+    mindmap_review: 'mind-map',
+    flashcards: 'flashcards',
+    flashcard_review: 'flashcards',
+    quiz: 'quiz',
+    quiz_session: 'quiz',
+  }
+  return mapping[type] || null
+}
+
+function sourceTypeForActivity(type: string): PlanActivity['generatedSourceType'] {
+  if (type === 'flashcards' || type === 'flashcard_review') return 'flashcard_set'
+  if (type === 'quiz' || type === 'quiz_session') return 'quiz_set'
+  if (type === 'mindmap' || type === 'mindmap_review') return 'mindmap_set'
+  if (type === 'review_due_cards') return 'review_cards'
+  return 'output'
+}
+
+function countToSize(count?: number): 'fewer' | 'standard' | 'more' {
+  if (!count || count <= 10) return 'fewer'
+  if (count <= 20) return 'standard'
+  return 'more'
+}
+
+function generationBodyForActivity(activity: PlanActivity, toolType: StudyToolGenerateType) {
+  const documentId = activity.documentId
+  const context = [activity.topic, activity.notes].filter(Boolean).join(' - ')
+  const body: Record<string, unknown> = {
+    type: toolType,
+    documentId,
+  }
+
+  if (toolType === 'flashcards') {
+    body.flashcardOptions = {
+      numberOfCards: countToSize(activity.cardCount),
+      difficulty: 'medium',
+      customInstructions: context ? `Focus on this plan activity: ${context}` : undefined,
+    }
+  }
+
+  if (toolType === 'quiz') {
+    body.quizOptions = activity.cardCount
+      ? {
+          numberOfQuestions: 'custom',
+          customCount: Math.min(50, Math.max(1, activity.cardCount)),
+          difficulty: 'medium',
+          customInstructions: context ? `Focus on this plan activity: ${context}` : undefined,
+        }
+      : {
+          numberOfQuestions: 'standard',
+          difficulty: 'medium',
+          customInstructions: context ? `Focus on this plan activity: ${context}` : undefined,
+        }
+  }
+
+  if (toolType === 'mind-map') {
+    body.mindMapOptions = {
+      depth: 3,
+      detailLevel: 'brief',
+      visualStyle: 'radial',
+      focusArea: activity.topic,
+      customInstructions: activity.notes || undefined,
+    }
+  }
+
+  return body
+}
+
+function reviewCardCountFromGeneration(result: GeneratedStudyToolResponse, fallback?: number): number | undefined {
+  if (result.cards?.length) return result.cards.length
+  if (result.questions?.length) return result.questions.length
+  if (result.mindMapData?.branches?.length) return fallback
+  return fallback
+}
+
+function isGenerationNeeded(activity: PlanActivity): boolean {
+  if (activity.type === 'review_due_cards') return false
+  if (activity.generationStatus === 'not_required') return false
+  if (activity.generationStatus === 'failed') return true
+  if (activity.generationStatus === 'not_generated') return true
+  return false
 }
 
 function isActivityComplete(activity: Pick<PlanActivity, 'completed' | 'completionStatus'>): boolean {
@@ -290,6 +412,173 @@ export default function PlanDetailPage() {
       })
     } catch {
       // Revert on failure
+      fetchPlan()
+    }
+  }
+
+  const patchActivityGeneration = async (
+    day: number,
+    activityIndex: number,
+    activity: Partial<PlanActivity>
+  ) => {
+    setPlan((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        schedule: current.schedule.map((scheduleDay) => {
+          if (scheduleDay.day !== day) return scheduleDay
+          return {
+            ...scheduleDay,
+            activities: scheduleDay.activities.map((entry, index) =>
+              index === activityIndex ? { ...entry, ...activity } : entry
+            ),
+          }
+        }),
+      }
+    })
+
+    const response = await fetch(`/api/active-recall/agent/plans/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_activity_generation',
+        day,
+        activityIndex,
+        generationStatus: activity.generationStatus,
+        generatedSourceId: activity.generatedSourceId,
+        generatedSourceType: activity.generatedSourceType,
+        cardCount: activity.cardCount,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error('Failed to update plan activity')
+    }
+  }
+
+  const syncGeneratedActivity = async (
+    activity: PlanActivity,
+    result: GeneratedStudyToolResponse,
+  ) => {
+    if (!result.id) return
+
+    if (result.type === 'flashcards' && result.cards?.length) {
+      const response = await fetch('/api/active-recall/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceType: 'flashcard',
+          sourceSetId: result.id,
+          documentId: activity.documentId,
+          planId: id,
+          cards: result.cards.map((card) => ({
+            id: card.id,
+            question: card.question,
+            answer: card.answer,
+            topic: card.topic,
+            difficulty: card.difficulty,
+          })),
+        }),
+      })
+      if (!response.ok) throw new Error('Generated flashcards could not be synced to review')
+    }
+
+    if (result.type === 'quiz' && result.questions?.length) {
+      const response = await fetch('/api/active-recall/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceType: 'quiz',
+          sourceSetId: result.id,
+          documentId: activity.documentId,
+          planId: id,
+          cards: result.questions.map((question) => ({
+            id: question.id,
+            question: question.question,
+            answer: `${question.options[question.correctAnswer]}${question.explanation ? `\n\n${question.explanation}` : ''}`,
+            options: question.options,
+            correctAnswer: question.correctAnswer,
+            topic: question.topic,
+            difficulty: question.difficulty,
+          })),
+        }),
+      })
+      if (!response.ok) throw new Error('Generated quiz could not be synced to review')
+    }
+
+    if (result.type === 'mind-map') {
+      const response = await fetch('/api/active-recall/agent/sync-mindmap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mindMapSetId: result.id, planId: id }),
+      })
+      if (!response.ok) throw new Error('Generated mind map could not be synced to review')
+    }
+  }
+
+  const handleGenerateActivity = async (day: number, activityIndex: number) => {
+    if (!plan) return
+    const dayEntry = plan.schedule.find((entry) => entry.day === day)
+    const activity = dayEntry?.activities[activityIndex]
+    if (!activity) return
+
+    const toolType = studyToolTypeForActivity(activity.type)
+    if (!toolType || !activity.documentId) {
+      toast.error('This activity cannot be generated yet.')
+      return
+    }
+
+    if (activity.generatedSourceId && activity.generationStatus === 'ready') {
+      toast.info('Material is already ready for this activity.')
+      return
+    }
+
+    try {
+      await patchActivityGeneration(day, activityIndex, { generationStatus: 'generating' })
+
+      const response = await fetch('/api/study-tools/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...generationBodyForActivity(activity, toolType),
+          planId: id,
+          planDay: day,
+          activityIndex,
+        }),
+        signal: AbortSignal.timeout(180000),
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null)
+        throw new Error(errorBody?.error || `Generation failed (${response.status})`)
+      }
+
+      const result = await response.json() as GeneratedStudyToolResponse
+      if (!result.id) {
+        throw new Error('Generation completed but did not return a saved material id')
+      }
+
+      if (!result.activeRecallSync) {
+        await syncGeneratedActivity(activity, result)
+
+        await patchActivityGeneration(day, activityIndex, {
+          generationStatus: 'ready',
+          generatedSourceId: result.id,
+          generatedSourceType: sourceTypeForActivity(activity.type),
+          cardCount: reviewCardCountFromGeneration(result, activity.cardCount),
+        })
+      }
+
+      window.dispatchEvent(new Event('study-tools-refresh'))
+      toast.success('Activity material is ready.')
+      fetchPlan()
+    } catch (error) {
+      await patchActivityGeneration(day, activityIndex, {
+        generationStatus: 'failed',
+        generatedSourceId: null,
+        generatedSourceType: null,
+      }).catch(() => undefined)
+      toast.error(error instanceof Error ? error.message : 'Failed to generate activity material.')
       fetchPlan()
     }
   }
@@ -485,6 +774,7 @@ export default function PlanDetailPage() {
                 activity={activity}
                 isToday
                 onComplete={() => handleToggleActivity(todayDay.day, idx)}
+                onGenerate={() => handleGenerateActivity(todayDay.day, idx)}
                 onReview={() => handleStartSession(ACTIVITY_CONFIG[activity.type]?.reviewType, true)}
               />
             ))}
@@ -634,12 +924,13 @@ export default function PlanDetailPage() {
                             activity={activity}
                             isToday={isToday}
                             onComplete={() => handleToggleActivity(day.day, idx)}
+                            onGenerate={() => handleGenerateActivity(day.day, idx)}
                             onReview={() => handleStartSession(ACTIVITY_CONFIG[activity.type]?.reviewType, true)}
                           />
                         ))}
 
                         {/* Start day's session */}
-                        {isToday && day.activities.some(a => !isActivityComplete(a)) && (
+                        {isToday && (stats?.dueCards ?? 0) > 0 && day.activities.some(a => !isActivityComplete(a)) && (
                           <Button
                             onClick={() => handleStartSession()}
                             variant="outline"
@@ -691,16 +982,25 @@ function ActivityRow({
   activity,
   isToday,
   onComplete,
+  onGenerate,
   onReview,
 }: {
   activity: PlanActivity
   isToday: boolean
   onComplete: () => void
+  onGenerate: () => void
   onReview: () => void
 }) {
   const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.flashcard_review
   const isCompleted = isActivityComplete(activity)
   const state = getActivityState(activity)
+  const isGenerating = activity.generationStatus === 'generating'
+  const canGenerate = isToday && (isGenerationNeeded(activity) || isGenerating) && !!studyToolTypeForActivity(activity.type)
+  const canReview = isToday
+    && !!config.reviewType
+    && activity.generationStatus !== 'not_generated'
+    && activity.generationStatus !== 'generating'
+    && activity.generationStatus !== 'failed'
 
   return (
     <div className={cn(
@@ -750,7 +1050,18 @@ function ActivityRow({
           {activity.cardCount ?? activity.plannedMinutes} {activityUnit(activity.type, activity.cardCount ?? activity.plannedMinutes)}
         </span>
 
-        {isToday && config.reviewType && (
+        {canGenerate ? (
+          <Button
+            variant={activity.generationStatus === 'failed' ? 'outline' : 'purple'}
+            size="sm"
+            onClick={(e) => { e.stopPropagation(); onGenerate() }}
+            disabled={isGenerating}
+            className="shrink-0 h-7 px-2.5 text-xs gap-1"
+          >
+            {isGenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <BookOpen className="h-3 w-3" />}
+            {activity.generationStatus === 'failed' ? 'Retry' : isGenerating ? 'Generating' : 'Generate'}
+          </Button>
+        ) : canReview ? (
           <Button
             variant="outline"
             size="sm"
@@ -760,7 +1071,7 @@ function ActivityRow({
             <Play className="h-3 w-3" />
             {isCompleted ? 'Revisit' : 'Review'}
           </Button>
-        )}
+        ) : null}
       </div>
     </div>
   )

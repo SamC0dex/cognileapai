@@ -184,7 +184,9 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
   const dueTotal = todayData?.dueCards.total || 0
   const todayActivities = todayData?.today?.activities || []
   const incompleteActivities = todayActivities.filter((activity) => !isActivityComplete(activity))
-  const needsMaterial = todayActivities.some((activity) => activity.generationStatus === 'not_generated')
+  const needsMaterial = todayActivities.some((activity) =>
+    activity.generationStatus === 'not_generated' || activity.generationStatus === 'failed'
+  )
   const nextActivity = incompleteActivities[0]
 
   return (
@@ -322,7 +324,17 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
           )}
 
           {/* Next action */}
-          {dueTotal > 0 ? (
+          {needsMaterial ? (
+            <Button
+              onClick={handleCardClick}
+              variant="purple"
+              size="sm"
+              className="w-full mt-3 gap-2"
+            >
+              <AlertCircle className="h-3.5 w-3.5" />
+              Prepare Today&apos;s Material
+            </Button>
+          ) : dueTotal > 0 ? (
             <Button
               onClick={handleStartSession}
               variant="purple"
@@ -335,15 +347,15 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
                 {dueTotal}
               </span>
             </Button>
-          ) : needsMaterial || nextActivity ? (
+          ) : nextActivity ? (
             <Button
               onClick={handleCardClick}
               variant="outline"
               size="sm"
               className="w-full mt-3 gap-2"
             >
-              {needsMaterial ? <AlertCircle className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-              {needsMaterial ? 'Prepare Today&apos;s Material' : 'Open Today&apos;s Plan'}
+              <Play className="h-3.5 w-3.5" />
+              Open Today&apos;s Plan
             </Button>
           ) : null}
         </div>
