@@ -16,17 +16,17 @@ import {
   XCircle,
   Activity,
   Loader2,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui'
 import { useActiveRecallStore } from '@/lib/active-recall-store'
 import { RecallLayer, RECALL_LAYER_LABELS } from '@/types/active-recall'
-import type { DocumentMastery, ReviewSession, PredictiveAnalytics } from '@/types/active-recall'
+import type { PredictiveAnalytics } from '@/types/active-recall'
 import { ForgettingCurveChart } from '@/components/active-recall/forgetting-curve-chart'
 import { RetentionForecastChart } from '@/components/active-recall/retention-forecast-chart'
 import { TopicMasteryTimeline } from '@/components/active-recall/topic-mastery-timeline'
 import { StuckCardsAlert } from '@/components/active-recall/stuck-cards-alert'
-import { WeeklyReportCard } from '@/components/active-recall/weekly-report-card'
 import { generateCurvePoints } from '@/lib/forgetting-curve'
 
 const CHART_COLORS = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f59e0b', '#ef4444', '#10b981', '#ec4899']
@@ -39,6 +39,7 @@ export default function InsightsPage() {
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
   const [predictive, setPredictive] = useState<PredictiveAnalytics | null>(null)
   const [predictiveLoading, setPredictiveLoading] = useState(true)
+  const [statsLoadExpired, setStatsLoadExpired] = useState(false)
 
   const fetchPredictive = useCallback(async () => {
     setPredictiveLoading(true)
@@ -58,7 +59,27 @@ export default function InsightsPage() {
     fetchPredictive()
   }, [fetchStats, fetchPredictive, period])
 
+  useEffect(() => {
+    setStatsLoadExpired(false)
+    const timer = window.setTimeout(() => setStatsLoadExpired(true), 7000)
+    return () => window.clearTimeout(timer)
+  }, [period])
+
   if (!stats) {
+    if (statsLoadExpired) {
+      return (
+        <div className="flex items-center justify-center h-[60vh] p-6">
+          <div className="text-center space-y-2 max-w-sm">
+            <BarChart3 className="h-10 w-10 mx-auto text-muted-foreground/40" />
+            <h2 className="text-lg font-semibold">Analytics are still warming up</h2>
+            <p className="text-sm text-muted-foreground">
+              Review cards or open an active study plan, then return here for personalized retention, weak-area, and pace insights.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="p-6 space-y-4">
         {[...Array(3)].map((_, i) => (
@@ -95,10 +116,20 @@ export default function InsightsPage() {
     }
   })
 
-  // Topic strength data from cards
-  const topicMap = new Map<string, { mastered: number; total: number; correct: number; reviews: number }>()
-  // We approximate from masteryByDocument since we don't have per-topic from the store
-  // This will be enhanced when we add the dedicated insights API
+  const weakestMaterials = [...masteryByDocument]
+    .sort((a, b) => a.masteryPct - b.masteryPct)
+    .slice(0, 3)
+  const hardestTopics = predictive?.topicMasteryTimelines
+    .slice(0, 3)
+    .map((topic) => topic.topic) || []
+  const actionText = getPrimaryAction({
+    due: stats.totalDue,
+    masteryPct: stats.masteryPct,
+    velocityTrend: predictive?.learningVelocity.trend,
+    stuckCount: predictive?.stuckCards.length || 0,
+    weakestMaterial: weakestMaterials[0]?.documentTitle,
+    hardestTopic: hardestTopics[0],
+  })
 
   const toggleSession = (id: string) => {
     setExpandedSessions((prev) => {
@@ -157,6 +188,16 @@ export default function InsightsPage() {
         )}
       </div>
 
+      <PersonalizedInsightStrip
+        actionText={actionText}
+        due={stats.totalDue}
+        accuracy={Math.round(stats.averageAccuracy)}
+        mastery={Math.round(stats.masteryPct)}
+        weakestMaterials={weakestMaterials}
+        hardestTopics={hardestTopics}
+        predictive={predictive}
+      />
+
       {/* Predictive: Retention Forecast */}
       {predictive && predictive.retentionForecast.length > 0 && (
         <motion.div
@@ -172,7 +213,7 @@ export default function InsightsPage() {
             {predictiveLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
           </div>
           <p className="text-xs text-muted-foreground mb-3">
-            Predicted average memory retention across all cards over the next {period === '7d' ? '7' : period === '90d' ? '90' : '30'} days
+            Where your memory is likely to drift if you do not review. Use this to choose today&apos;s review load.
           </p>
           <div className="overflow-x-auto">
             <RetentionForecastChart data={predictive.retentionForecast} />
@@ -193,7 +234,7 @@ export default function InsightsPage() {
             Topic Mastery Timeline
           </h3>
           <p className="text-xs text-muted-foreground mb-4">
-            Estimated time to reach mastery for each topic based on your learning pace
+            Topics with the most remaining work, ranked by current accuracy and estimated reviews needed.
           </p>
           <TopicMasteryTimeline timelines={predictive.topicMasteryTimelines} />
         </motion.div>
@@ -211,6 +252,9 @@ export default function InsightsPage() {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
             Memory Retention Forecast
           </h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            Material-level retention estimate based on your current review state.
+          </p>
           <div className="overflow-x-auto">
             <ForgettingCurveChart
               curves={chartCurves}
@@ -228,6 +272,9 @@ export default function InsightsPage() {
             <Brain className="h-4 w-4 text-muted-foreground" />
             Material Strength
           </h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            Quickly spot which documents need more learn/practice/review cycles.
+          </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
             {masteryByDocument.map((doc) => {
               const strength = doc.masteryPct
@@ -432,10 +479,112 @@ export default function InsightsPage() {
         </div>
       )}
 
-      {/* Weekly Report */}
-      <WeeklyReportCard />
     </div>
   )
+}
+
+function PersonalizedInsightStrip({
+  actionText,
+  due,
+  accuracy,
+  mastery,
+  weakestMaterials,
+  hardestTopics,
+  predictive,
+}: {
+  actionText: string
+  due: number
+  accuracy: number
+  mastery: number
+  weakestMaterials: Array<{ documentTitle: string; masteryPct: number }>
+  hardestTopics: string[]
+  predictive: PredictiveAnalytics | null
+}) {
+  const riskText = hardestTopics.length > 0
+    ? hardestTopics.join(', ')
+    : weakestMaterials.length > 0
+      ? weakestMaterials.map((m) => m.documentTitle).join(', ')
+      : 'No clear weak area yet'
+
+  const paceText = predictive
+    ? `${predictive.learningVelocity.cardsPerDay}/day, ${predictive.learningVelocity.trend}`
+    : 'Review more cards to calculate pace'
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <InsightCard
+        icon={ArrowRight}
+        title="Best next move"
+        body={actionText}
+        tone="primary"
+      />
+      <InsightCard
+        icon={AlertTriangle}
+        title="Weakest focus"
+        body={riskText}
+        tone={hardestTopics.length || weakestMaterials.length ? 'warning' : 'muted'}
+      />
+      <InsightCard
+        icon={Activity}
+        title="Learning signal"
+        body={`${accuracy}% accuracy, ${mastery}% mastery, ${due} due. Pace: ${paceText}.`}
+        tone="muted"
+      />
+    </div>
+  )
+}
+
+function InsightCard({
+  icon: Icon,
+  title,
+  body,
+  tone,
+}: {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  body: string
+  tone: 'primary' | 'warning' | 'muted'
+}) {
+  return (
+    <div className={cn(
+      'rounded-xl border p-4 bg-card',
+      tone === 'primary' && 'border-primary/25 bg-primary/5',
+      tone === 'warning' && 'border-amber-200 bg-amber-50/70 dark:border-amber-900/60 dark:bg-amber-950/20'
+    )}>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon className={cn(
+          'h-4 w-4',
+          tone === 'primary' && 'text-primary',
+          tone === 'warning' && 'text-amber-600 dark:text-amber-400',
+          tone === 'muted' && 'text-muted-foreground'
+        )} />
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
+      </div>
+      <p className="text-sm leading-relaxed">{body}</p>
+    </div>
+  )
+}
+
+function getPrimaryAction({
+  due,
+  masteryPct,
+  velocityTrend,
+  stuckCount,
+  weakestMaterial,
+  hardestTopic,
+}: {
+  due: number
+  masteryPct: number
+  velocityTrend?: 'improving' | 'stable' | 'declining'
+  stuckCount: number
+  weakestMaterial?: string
+  hardestTopic?: string
+}) {
+  if (due > 0) return `Review ${due} due card${due !== 1 ? 's' : ''} first, then ask the Study Agent to adapt today's plan.`
+  if (stuckCount > 0) return `Work through ${stuckCount} stuck card${stuckCount !== 1 ? 's' : ''}; focus on ${hardestTopic || weakestMaterial || 'the weakest topic'}.`
+  if (masteryPct < 50) return `Build understanding before testing: generate a study guide or mind map for ${weakestMaterial || hardestTopic || 'your weakest material'}.`
+  if (velocityTrend === 'declining') return 'Your pace is slipping. Keep today short: one focused review block and one quiz on a weak topic.'
+  return 'You are on track. Continue the next planned activity and keep reviews current.'
 }
 
 function StatPill({

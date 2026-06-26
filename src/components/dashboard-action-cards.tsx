@@ -1,175 +1,145 @@
 'use client'
 
 import * as React from 'react'
-import { BookOpen, PenTool, Zap, GraduationCap } from 'lucide-react'
-import { ActionCard, Badge } from '@/components/ui'
+import { BookOpen, PenTool, Zap, HelpCircle, Network, Brain, ArrowRight } from 'lucide-react'
 import { FlashcardsStackIcon } from '@/components/icons/flashcards-stack-icon'
 import { useStudyToolsStore, type StudyToolType } from '@/lib/study-tools-store'
+import { useActiveRecallStore } from '@/lib/active-recall-store'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui'
 
-interface DashboardActionCardsProps {
-  className?: string
-}
+const TOOLS = [
+  {
+    type: 'study-guide' as StudyToolType,
+    label: 'Study Guide',
+    description: 'Structured overview',
+    icon: BookOpen,
+    iconBg: 'bg-blue-50 dark:bg-blue-900/20',
+    iconColor: 'text-blue-600 dark:text-blue-400',
+  },
+  {
+    type: 'flashcards' as StudyToolType,
+    label: 'Flashcards',
+    description: 'Q&A for memorization',
+    icon: null,
+    iconBg: 'bg-emerald-50 dark:bg-emerald-900/20',
+    iconColor: 'text-emerald-600 dark:text-emerald-400',
+  },
+  {
+    type: 'quiz' as StudyToolType,
+    label: 'Quiz',
+    description: 'Test your knowledge',
+    icon: HelpCircle,
+    iconBg: 'bg-amber-50 dark:bg-amber-900/20',
+    iconColor: 'text-amber-600 dark:text-amber-400',
+  },
+  {
+    type: 'mind-map' as StudyToolType,
+    label: 'Mind Map',
+    description: 'Visual connections',
+    icon: Network,
+    iconBg: 'bg-pink-50 dark:bg-pink-900/20',
+    iconColor: 'text-pink-600 dark:text-pink-400',
+  },
+  {
+    type: 'smart-notes' as StudyToolType,
+    label: 'Smart Notes',
+    description: 'Organized highlights',
+    icon: PenTool,
+    iconBg: 'bg-purple-50 dark:bg-purple-900/20',
+    iconColor: 'text-purple-600 dark:text-purple-400',
+  },
+  {
+    type: 'smart-summary' as StudyToolType,
+    label: 'Summary',
+    description: 'Key insights fast',
+    icon: Zap,
+    iconBg: 'bg-rose-50 dark:bg-rose-900/20',
+    iconColor: 'text-rose-600 dark:text-rose-400',
+  },
+]
 
-type CardItem = {
-  title: string
-  description: string
-  icon: React.ReactNode
-  variant: 'default' | 'purple' | 'teal'
-  onClick?: () => void
-  href?: string
-  badge?: React.ReactNode
-}
-
-export function DashboardActionCards({}: DashboardActionCardsProps) {
+export function DashboardActionCards() {
   const router = useRouter()
   const { expandPanel, setHighlightedTool } = useStudyToolsStore()
+  const { totalDue, stats, fetchDueCards, fetchStats } = useActiveRecallStore()
 
-  // Handle navigation to study tools
-  const handleStudyToolNavigation = (toolType: StudyToolType) => {
-    // Set up highlighting and panel state
+  React.useEffect(() => {
+    void fetchDueCards()
+    void fetchStats()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleToolClick = (toolType: StudyToolType) => {
     setHighlightedTool(toolType)
     expandPanel()
-
-    // Navigate to chat page
     router.push('/chat')
   }
 
-  const actionCards: CardItem[] = [
-    {
-      title: "Generate Course",
-      description: "5-min lessons with quizzes",
-      icon: <GraduationCap className="h-6 w-6" />,
-      variant: "teal" as const,
-      href: '/courses/create',
-      badge: <Badge variant="new" className="absolute top-2 right-2 text-xs px-2 py-0.5">NEW</Badge>
-    },
-    {
-      title: "Generate Study Guide",
-      description: "Structured learning materials",
-      icon: <BookOpen className="h-6 w-6" />,
-      variant: "purple" as const,
-      onClick: () => handleStudyToolNavigation('study-guide')
-    },
-    {
-      title: "Create Flashcards",
-      description: "Interactive Q&A cards",
-      icon: <FlashcardsStackIcon size={24} />,
-      variant: "teal" as const,
-      onClick: () => handleStudyToolNavigation('flashcards')
-    },
-    {
-      title: "Make Smart Notes",
-      description: "Organized notes with highlights",
-      icon: <PenTool className="h-6 w-6" />,
-      variant: "default" as const,
-      onClick: () => handleStudyToolNavigation('smart-notes')
-    },
-    {
-      title: "Get Smart Summary",
-      description: "Key insights and main points",
-      icon: <Zap className="h-6 w-6" />,
-      variant: "purple" as const,
-      onClick: () => handleStudyToolNavigation('smart-summary')
-    }
-  ]
-
   return (
-    <div className="px-8 py-4">
-      <div className="space-y-6">
-        {/* Action Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 max-w-7xl">
-          {actionCards.map((card) => {
-            const content = (
-              <div key={card.title} className="relative">
-                <ActionCard
-                  title={card.title}
-                  description={card.description}
-                  icon={card.icon}
-                  variant={card.variant}
-                  onClick={card.href ? undefined : card.onClick}
-                  className="h-24 hover:shadow-glow"
-                />
-                {card.badge}
-              </div>
+    <div className="px-8 pb-6 space-y-6">
+      {/* Tool grid */}
+      <div>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest mb-3">
+          Generate
+        </p>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
+          {TOOLS.map((tool) => {
+            const IconComp = tool.icon
+            return (
+              <button
+                key={tool.type}
+                onClick={() => handleToolClick(tool.type)}
+                className="group flex flex-col items-center gap-2.5 px-3 py-4 rounded-xl border border-border bg-card hover:border-primary/25 hover:shadow-sm hover:bg-muted/30 transition-all duration-150 cursor-pointer"
+              >
+                <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0', tool.iconBg)}>
+                  {IconComp ? (
+                    <IconComp className={cn('w-[18px] h-[18px]', tool.iconColor)} />
+                  ) : (
+                    <FlashcardsStackIcon size={18} className={tool.iconColor} />
+                  )}
+                </div>
+                <div className="text-center">
+                  <p className="text-[13px] font-medium text-foreground leading-tight">{tool.label}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 leading-tight hidden sm:block">
+                    {tool.description}
+                  </p>
+                </div>
+              </button>
             )
-            return card.href ? (
-              <Link key={card.title} href={card.href} prefetch>
-                {content}
-              </Link>
-            ) : content
           })}
         </div>
-
-        {/* Feature Highlights */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 max-w-6xl pt-4 mx-auto">
-          {/* Courses */}
-          <div className="text-center space-y-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-teal-500/20 to-teal-500/10 flex items-center justify-center mx-auto border border-teal-500/20">
-              <GraduationCap className="h-5 w-5 text-teal-600 dark:text-teal-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-base mb-1">Courses</h3>
-              <p className="text-sm text-muted-foreground">
-                AI-generated micro-courses with lessons, quizzes, and progress tracking
-              </p>
-            </div>
-          </div>
-
-          {/* Study Guides */}
-          <div className="text-center space-y-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-blue-500/10 flex items-center justify-center mx-auto border border-blue-500/20">
-              <BookOpen className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-base mb-1">Study Guides</h3>
-              <p className="text-sm text-muted-foreground">
-                Generate structured study materials and practice questions
-              </p>
-            </div>
-          </div>
-
-          {/* Flashcards */}
-          <div className="text-center space-y-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500/20 to-green-500/10 flex items-center justify-center mx-auto border border-green-500/20">
-              <FlashcardsStackIcon size={20} className="text-green-600 dark:text-green-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-base mb-1">Flashcards</h3>
-              <p className="text-sm text-muted-foreground">
-                Interactive Q&A cards for memorization and review
-              </p>
-            </div>
-          </div>
-
-          {/* Smart Notes */}
-          <div className="text-center space-y-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500/20 to-purple-500/10 flex items-center justify-center mx-auto border border-purple-500/20">
-              <PenTool className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-base mb-1">Smart Notes</h3>
-              <p className="text-sm text-muted-foreground">
-                Create organized notes with key concepts highlighted
-              </p>
-            </div>
-          </div>
-
-          {/* Smart Summary */}
-          <div className="text-center space-y-2">
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500/20 to-amber-500/10 flex items-center justify-center mx-auto border border-amber-500/20">
-              <Zap className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-base mb-1">Smart Summary</h3>
-              <p className="text-sm text-muted-foreground">
-                Extract key insights and main points from your documents automatically
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
+
+      {/* Active Recall banner — only shown when cards are due */}
+      {totalDue > 0 && (
+        <div className="flex items-center justify-between gap-4 px-5 py-4 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50/60 dark:bg-violet-900/20">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-violet-100 dark:bg-violet-800/40 flex items-center justify-center flex-shrink-0">
+              <Brain className="w-[18px] h-[18px] text-violet-600 dark:text-violet-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-violet-900 dark:text-violet-100">
+                {totalDue} card{totalDue !== 1 ? 's' : ''} due for review
+              </p>
+              <p className="text-xs text-violet-600/80 dark:text-violet-400/80 mt-0.5">
+                {(stats?.currentStreak ?? 0) > 0
+                  ? `${stats!.currentStreak}-day streak · ${stats?.totalCards ?? 0} total cards`
+                  : `${stats?.totalCards ?? 0} total cards · keep the momentum going`}
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => router.push('/active-recall/review')}
+            size="sm"
+            className="bg-violet-600 hover:bg-violet-700 text-white h-8 px-3 text-xs gap-1.5 flex-shrink-0"
+          >
+            Start review
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

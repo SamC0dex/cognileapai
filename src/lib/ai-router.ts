@@ -7,6 +7,7 @@
 import { getUserAIConfig, generateCompletion, generateCompletionStream, type UserAIConfig, type ChatMessage, type GenerateOptions, type StreamChunk, type TokenUsage } from './ai-providers'
 import OpenAI from 'openai'
 import { createClient } from '@supabase/supabase-js'
+import { GoogleGenAI } from '@google/genai'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -86,6 +87,56 @@ function createKieClient(apiKey: string, model: string): OpenAI {
   })
 }
 
+function isProviderBlockedError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  const status = (error as { status?: number })?.status
+  return status === 403 || /\b403\b/i.test(message) || /request was blocked/i.test(message)
+}
+
+function getServerGoogleKey() {
+  return process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_AI_API_KEY
+}
+
+async function generateWithServerGemini(
+  options: GenerateOptions
+): Promise<{ text: string; config: ResolvedAIConfig; usage: TokenUsage | null }> {
+  const apiKey = getServerGoogleKey()
+  if (!apiKey) {
+    throw new Error('No Google fallback API key configured')
+  }
+
+  const model = process.env.GEMINI_FAST_MODEL || 'gemini-2.5-flash'
+  const genai = new GoogleGenAI({ apiKey })
+  const prompt = options.messages
+    .map((message) => `${message.role.toUpperCase()}:\n${message.content}`)
+    .join('\n\n')
+
+  const response = await genai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      maxOutputTokens: options.maxTokens || 4096,
+      temperature: options.temperature ?? 0.7,
+    },
+  })
+
+  const usageMetadata = response.usageMetadata
+  return {
+    text: response.text || '',
+    config: {
+      source: 'server',
+      provider: 'gemini',
+      model,
+      userConfig: null,
+    },
+    usage: usageMetadata ? {
+      promptTokens: usageMetadata.promptTokenCount ?? 0,
+      completionTokens: usageMetadata.candidatesTokenCount ?? 0,
+      totalTokens: usageMetadata.totalTokenCount ?? 0,
+    } : null,
+  }
+}
+
 /**
  * Generate a non-streaming completion using resolved config
  */
@@ -140,8 +191,19 @@ export async function* routedCompletionStream(
   const config = await resolveAIConfig(userId)
 
   if (config.userConfig) {
-    for await (const chunk of generateCompletionStream(config.userConfig, options)) {
-      yield { ...chunk, config: chunk.isComplete ? config : undefined }
+    try {
+      for await (const chunk of generateCompletionStream(config.userConfig, options)) {
+        yield { ...chunk, config: chunk.isComplete ? config : undefined }
+      }
+    } catch (error) {
+      if (!isProviderBlockedError(error)) throw error
+
+      console.warn('[AIRouter] Provider blocked streaming request, falling back to server Gemini:', error)
+      const fallback = await generateWithServerGemini(options)
+      if (fallback.text) {
+        yield { text: fallback.text, isComplete: false }
+      }
+      yield { text: '', isComplete: true, usage: fallback.usage, config: fallback.config }
     }
     return
   }

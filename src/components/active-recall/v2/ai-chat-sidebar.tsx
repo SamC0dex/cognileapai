@@ -521,6 +521,11 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
           }
 
           const succeeded = results.filter((r) => r.success).length
+          if (succeeded > 0 && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('study-tools-refresh', {
+              detail: { source: 'active-recall-agent', generated: results, types },
+            }))
+          }
           if (succeeded === 0) {
             result = { error: `All ${results.length} tool generations failed`, generated: results, types }
           } else if (succeeded < results.length) {
@@ -960,27 +965,21 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
   return (
     <>
       {/* Floating Toggle Button */}
-      <AnimatePresence>
-        {!isOpen && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-            onClick={onToggle}
-            className={cn(
-              'fixed bottom-6 right-6 z-[250]',
-              'flex items-center gap-2 px-4 py-3 rounded-full',
-              'bg-primary text-primary-foreground shadow-lg',
-              'hover:shadow-xl hover:scale-105 active:scale-95',
-              'transition-shadow'
-            )}
-          >
-            <Sparkles className="h-5 w-5" />
-            <span className="text-sm font-medium">Study Agent</span>
-          </motion.button>
-        )}
-      </AnimatePresence>
+      {!isOpen && (
+        <button
+          onClick={onToggle}
+          className={cn(
+            'fixed bottom-6 right-6 z-[250]',
+            'inline-flex h-12 min-w-[132px] items-center justify-center gap-2 px-4 rounded-full',
+            'bg-primary text-primary-foreground shadow-lg',
+            'hover:shadow-xl hover:scale-[1.03] active:scale-[0.98]',
+            'transition'
+          )}
+        >
+          <Sparkles className="h-5 w-5" />
+          <span className="text-sm font-medium">Study Agent</span>
+        </button>
+      )}
 
       {/* Chat Panel */}
       <AnimatePresence>

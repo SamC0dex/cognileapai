@@ -8,6 +8,7 @@ import {
   Timer,
   ArrowUpRight,
   ArrowDownRight,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useActiveRecallStore } from '@/lib/active-recall-store'
@@ -46,6 +47,7 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
 
   const [activePlans, setActivePlans] = useState<ActivePlan[]>([])
   const [plansLoading, setPlansLoading] = useState(true)
+  const [initialLoadExpired, setInitialLoadExpired] = useState(false)
 
   const fetchActivePlans = useCallback(async () => {
     setPlansLoading(true)
@@ -68,6 +70,11 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
     fetchActivePlans()
     fetchNudgeMessage()
   }, [fetchStats, fetchDueCards, fetchActivePlans, fetchNudgeMessage])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setInitialLoadExpired(true), 7000)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   // Listen for agent events to auto-refresh
   const refreshAll = useCallback(() => {
@@ -105,7 +112,7 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
   }
 
   // Loading skeleton
-  if ((isLoading || plansLoading) && activePlans.length === 0) {
+  if ((isLoading || plansLoading) && activePlans.length === 0 && !initialLoadExpired) {
     return (
       <div className={cn('space-y-4 p-6', className)}>
         <div className="h-24 rounded-2xl bg-muted animate-pulse" />
@@ -148,6 +155,12 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
         mastery={stats?.masteryPct ?? 0}
       />
 
+      <AgentFlowHint
+        hasPlans={activePlans.length > 0}
+        dueToday={dueToday}
+        mastery={stats?.masteryPct ?? 0}
+      />
+
       {/* Active Study Plans */}
       {activePlans.length > 0 && (
         <div className="space-y-3">
@@ -183,6 +196,36 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
 }
 
 // ─── Learning Progress: stacked layer bar + breakdown ───
+
+function AgentFlowHint({
+  hasPlans,
+  dueToday,
+  mastery,
+}: {
+  hasPlans: boolean
+  dueToday: number
+  mastery: number
+}) {
+  const text = !hasPlans
+    ? 'Start with the Study Agent: choose a document, describe your exam or goal, and let it build the plan.'
+    : dueToday > 0
+      ? 'Review due cards first. The agent uses your answers to decide what to explain, quiz, or reinforce next.'
+      : mastery < 50
+        ? 'Your next best move is learning material: summaries, notes, or mind maps before heavier testing.'
+        : 'Your plan is active. Generate only today\'s material, complete it, then let readiness guide the next step.'
+
+  return (
+    <div className="rounded-xl border bg-muted/30 px-4 py-3 flex items-start gap-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <Sparkles className="h-4 w-4" />
+      </div>
+      <div>
+        <p className="text-sm font-medium">How Active Recall is guiding you</p>
+        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{text}</p>
+      </div>
+    </div>
+  )
+}
 
 function LearningProgress({
   cardsByLayer,

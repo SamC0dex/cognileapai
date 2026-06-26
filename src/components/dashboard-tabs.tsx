@@ -5,11 +5,12 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FlashcardSet } from '@/types/flashcards'
+import type { QuizSet } from '@/types/quiz'
+import type { MindMapSet } from '@/types/mindmap'
 import {
   FileText,
   BookOpen,
   Search,
-  Filter,
   Plus,
   Grid3x3,
   List,
@@ -34,6 +35,8 @@ import {
 } from '@/components/ui'
 import { useStudyToolsStore, STUDY_TOOLS, type StudyToolContent } from '@/lib/study-tools-store'
 import { useFlashcardStore } from '@/lib/flashcard-store'
+import { useQuizStore } from '@/lib/quiz-store'
+import { useMindMapStore } from '@/lib/mindmap-store'
 import { FlashcardsStackIcon } from '@/components/icons/flashcards-stack-icon'
 import { useAuth } from '@/contexts/auth-context'
 import { DashboardSkeleton } from '@/components/dashboard-skeleton'
@@ -67,32 +70,25 @@ const StudyToolCard: React.FC<StudyToolCardProps> = ({ content, onClick }) => {
   return (
     <div
       onClick={onClick}
-      className={cn(
-        "group p-4 rounded-lg border-2 cursor-pointer transition-all duration-200",
-        "hover:shadow-lg hover:shadow-black/5 hover:border-opacity-80",
-        tool.color,
-        tool.borderColor
-      )}
+      className="group p-4 rounded-xl border border-border bg-card cursor-pointer transition-all duration-150 hover:shadow-sm hover:border-border-strong hover:bg-muted/20"
     >
       <div className="flex items-start gap-3">
-        <div className={cn("p-2 rounded-lg", tool.color)}>
-          <IconComponent className={cn("w-5 h-5", tool.textColor)} />
+        <div className={cn("p-2 rounded-lg flex-shrink-0", tool.color)}>
+          <IconComponent className={cn("w-4 h-4", tool.textColor)} />
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className={cn("font-medium text-sm truncate mb-1", tool.textColor)}>
+          <h4 className="font-medium text-sm truncate mb-1 text-foreground">
             {content.title}
           </h4>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="w-3 h-3" />
-            <span>
-              {new Date(content.createdAt).toLocaleDateString()}
-            </span>
-            <span className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">
+            <span>{new Date(content.createdAt).toLocaleDateString()}</span>
+            <span className="bg-muted px-1.5 py-0.5 rounded-md">
               {Math.round(content.content.length / 1000)}k chars
             </span>
           </div>
         </div>
-        <ExternalLink className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
       </div>
     </div>
   )
@@ -108,27 +104,25 @@ const FlashcardCard: React.FC<FlashcardCardProps> = ({ flashcardSet, onClick }) 
   return (
     <div
       onClick={onClick}
-      className="group p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 hover:shadow-lg hover:shadow-black/5 hover:border-opacity-80 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+      className="group p-4 rounded-xl border border-border bg-card cursor-pointer transition-all duration-150 hover:shadow-sm hover:border-border-strong hover:bg-muted/20"
     >
       <div className="flex items-start gap-3">
-        <div className="p-2 rounded-lg bg-green-50 dark:bg-green-900/20">
-          <FlashcardsStackIcon size={20} className="text-green-700 dark:text-green-300" />
+        <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex-shrink-0">
+          <FlashcardsStackIcon size={16} className="text-emerald-600 dark:text-emerald-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-sm truncate mb-1 text-green-700 dark:text-green-300">
+          <h4 className="font-medium text-sm truncate mb-1 text-foreground">
             {flashcardSet.title}
           </h4>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock className="w-3 h-3" />
-            <span>
-              {new Date(flashcardSet.createdAt).toLocaleDateString()}
-            </span>
-            <span className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">
+            <span>{new Date(flashcardSet.createdAt).toLocaleDateString()}</span>
+            <span className="bg-muted px-1.5 py-0.5 rounded-md">
               {flashcardSet.cards.length} cards
             </span>
           </div>
         </div>
-        <ExternalLink className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
       </div>
     </div>
   )
@@ -147,31 +141,27 @@ const StudyToolListItem: React.FC<StudyToolListItemProps> = ({ content, onClick 
   return (
     <div
       onClick={onClick}
-      className={cn(
-        "group p-3 rounded-lg border cursor-pointer transition-all duration-200",
-        "hover:shadow-md hover:shadow-black/5 bg-background/50 hover:bg-background/80",
-        tool.borderColor
-      )}
+      className="group p-3 rounded-lg border border-border bg-card cursor-pointer transition-all duration-150 hover:bg-muted/20 hover:border-border-strong"
     >
-      <div className="flex items-start gap-3">
-        <div className={cn("p-1.5 rounded-lg", tool.color)}>
+      <div className="flex items-center gap-3">
+        <div className={cn("p-1.5 rounded-lg flex-shrink-0", tool.color)}>
           <IconComponent className={cn("w-3.5 h-3.5", tool.textColor)} />
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-sm truncate mb-1">
+          <h4 className="font-medium text-sm truncate text-foreground">
             {content.title}
           </h4>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
             <Clock className="w-3 h-3" />
             <span>
               {new Date(content.createdAt).toLocaleDateString()} at {new Date(content.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
             </span>
-            <span className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">
+            <span className="bg-muted px-1.5 py-0.5 rounded-md">
               {Math.round(content.content.length / 1000)}k chars
             </span>
           </div>
         </div>
-        <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        <ExternalLink className="w-3 h-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
       </div>
     </div>
   )
@@ -187,27 +177,97 @@ const FlashcardListItem: React.FC<FlashcardListItemProps> = ({ flashcardSet, onC
   return (
     <div
       onClick={onClick}
-      className="group p-3 rounded-lg border cursor-pointer transition-all duration-200 hover:shadow-md hover:shadow-black/5 bg-background/50 hover:bg-background/80 border-green-200 dark:border-green-800"
+      className="group p-3 rounded-lg border border-border bg-card cursor-pointer transition-all duration-150 hover:bg-muted/20 hover:border-border-strong"
     >
-      <div className="flex items-start gap-3">
-        <div className="p-1.5 rounded-lg bg-green-50 dark:bg-green-900/20">
-          <FlashcardsStackIcon size={16} className="text-green-700 dark:text-green-300" />
+      <div className="flex items-center gap-3">
+        <div className="p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex-shrink-0">
+          <FlashcardsStackIcon size={14} className="text-emerald-600 dark:text-emerald-400" />
         </div>
         <div className="flex-1 min-w-0">
-          <h4 className="font-medium text-sm truncate mb-1">
+          <h4 className="font-medium text-sm truncate text-foreground">
             {flashcardSet.title}
           </h4>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
             <Clock className="w-3 h-3" />
             <span>
               {new Date(flashcardSet.createdAt).toLocaleDateString()} at {new Date(flashcardSet.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
             </span>
-            <span className="text-xs bg-muted/50 px-1.5 py-0.5 rounded">
+            <span className="bg-muted px-1.5 py-0.5 rounded-md">
               {flashcardSet.cards.length} cards
             </span>
           </div>
         </div>
-        <ExternalLink className="w-3 h-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        <ExternalLink className="w-3 h-3 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+      </div>
+    </div>
+  )
+}
+
+interface QuizCardProps {
+  quizSet: QuizSet
+  onClick: () => void
+}
+
+const QuizCard: React.FC<QuizCardProps> = ({ quizSet, onClick }) => (
+  <LibraryCard
+    title={quizSet.title}
+    meta={`${quizSet.questions.length} questions`}
+    icon={<HelpCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />}
+    iconClassName="bg-amber-50 dark:bg-amber-900/20"
+    createdAt={quizSet.createdAt}
+    onClick={onClick}
+  />
+)
+
+interface MindMapCardProps {
+  mindMapSet: MindMapSet
+  onClick: () => void
+}
+
+const MindMapCard: React.FC<MindMapCardProps> = ({ mindMapSet, onClick }) => (
+  <LibraryCard
+    title={mindMapSet.title}
+    meta={`${mindMapSet.metadata.totalNodes || mindMapSet.mindMapData.metadata?.totalNodes || 0} nodes`}
+    icon={<Network className="w-4 h-4 text-teal-600 dark:text-teal-400" />}
+    iconClassName="bg-teal-50 dark:bg-teal-900/20"
+    createdAt={mindMapSet.createdAt}
+    onClick={onClick}
+  />
+)
+
+function LibraryCard({
+  title,
+  meta,
+  icon,
+  iconClassName,
+  createdAt,
+  onClick,
+}: {
+  title: string
+  meta: string
+  icon: React.ReactNode
+  iconClassName: string
+  createdAt: Date
+  onClick: () => void
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className="group p-4 rounded-xl border border-border bg-card cursor-pointer transition-all duration-150 hover:shadow-sm hover:border-border-strong hover:bg-muted/20"
+    >
+      <div className="flex items-start gap-3">
+        <div className={cn('p-2 rounded-lg flex-shrink-0', iconClassName)}>
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="font-medium text-sm truncate mb-1 text-foreground">{title}</h4>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Clock className="w-3 h-3" />
+            <span>{new Date(createdAt).toLocaleDateString()}</span>
+            <span className="bg-muted px-1.5 py-0.5 rounded-md">{meta}</span>
+          </div>
+        </div>
+        <ExternalLink className="w-3.5 h-3.5 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
       </div>
     </div>
   )
@@ -235,6 +295,18 @@ export function DashboardTabs({
     clearFlashcardSets,
     _hasHydrated: flashcardsHydrated
   } = useFlashcardStore()
+  const {
+    quizSets,
+    openViewer: openQuizViewer,
+    clearQuizSets,
+    _hasHydrated: quizzesHydrated,
+  } = useQuizStore()
+  const {
+    mindMapSets,
+    openViewer: openMindMapViewer,
+    clearMindMapSets,
+    _hasHydrated: mindMapsHydrated,
+  } = useMindMapStore()
 
   const [activeTab, setActiveTab] = useState('all')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -246,7 +318,7 @@ export function DashboardTabs({
   const [isInitialLoad, setIsInitialLoad] = useState(true)
 
   // Track if stores have hydrated
-  const storesHydrated = studyToolsHydrated && flashcardsHydrated
+  const storesHydrated = studyToolsHydrated && flashcardsHydrated && quizzesHydrated && mindMapsHydrated
 
   // Load data on mount or when user changes
   useEffect(() => {
@@ -258,6 +330,8 @@ export function DashboardTabs({
     if (!user) {
       clearGeneratedContent()
       clearFlashcardSets()
+      clearQuizSets()
+      clearMindMapSets()
       setLastLoadedUserId(null)
       setIsInitialLoad(false)
       return
@@ -268,7 +342,7 @@ export function DashboardTabs({
       return
     }
 
-    const hasCachedData = generatedContent.length > 0 || flashcardSets.length > 0
+    const hasCachedData = generatedContent.length > 0 || flashcardSets.length > 0 || quizSets.length > 0 || mindMapSets.length > 0
 
     if (hasCachedData) {
       setIsInitialLoad(false)
@@ -307,6 +381,8 @@ export function DashboardTabs({
   const getFilteredData = () => {
     let studyTools = generatedContent.filter(content => !content.isGenerating)
     let flashcards = flashcardSets.filter(set => !set.metadata?.isGenerating)
+    let quizzes = quizSets.filter(set => !set.metadata?.isGenerating)
+    let mindMaps = mindMapSets.filter(set => !set.metadata?.isGenerating)
 
     // Apply search filter
     if (searchQuery) {
@@ -318,21 +394,31 @@ export function DashboardTabs({
       flashcards = flashcards.filter(set =>
         set.title.toLowerCase().includes(query)
       )
+      quizzes = quizzes.filter(set =>
+        set.title.toLowerCase().includes(query)
+      )
+      mindMaps = mindMaps.filter(set =>
+        set.title.toLowerCase().includes(query)
+      )
     }
 
     switch (activeTab) {
       case 'documents':
-        return { studyTools, flashcards: [] }
+        return { studyTools, flashcards: [], quizzes: [], mindMaps: [] }
       case 'flashcards':
-        return { studyTools: [], flashcards }
+        return { studyTools: [], flashcards, quizzes: [], mindMaps: [] }
+      case 'quizzes':
+        return { studyTools: [], flashcards: [], quizzes, mindMaps: [] }
+      case 'mindmaps':
+        return { studyTools: [], flashcards: [], quizzes: [], mindMaps }
       case 'all':
       default:
-        return { studyTools, flashcards }
+        return { studyTools, flashcards, quizzes, mindMaps }
     }
   }
 
-  const { studyTools, flashcards } = getFilteredData()
-  const totalItems = studyTools.length + flashcards.length
+  const { studyTools, flashcards, quizzes, mindMaps } = getFilteredData()
+  const totalItems = studyTools.length + flashcards.length + quizzes.length + mindMaps.length
 
   // Click handlers that navigate to chat page and open the content
   const handleStudyToolClick = (content: StudyToolContent) => {
@@ -367,12 +453,36 @@ export function DashboardTabs({
     }
   }
 
+  const handleQuizClick = (quizSet: QuizSet) => {
+    expandPanel()
+    openQuizViewer(quizSet)
+    if (quizSet.documentId) {
+      router.push(`/chat?type=document&documentId=${quizSet.documentId}`)
+    } else if (quizSet.conversationId) {
+      router.push(`/chat/${quizSet.conversationId}`)
+    } else {
+      router.push('/chat')
+    }
+  }
+
+  const handleMindMapClick = (mindMapSet: MindMapSet) => {
+    expandPanel()
+    openMindMapViewer(mindMapSet)
+    if (mindMapSet.documentId) {
+      router.push(`/chat?type=document&documentId=${mindMapSet.documentId}`)
+    } else if (mindMapSet.conversationId) {
+      router.push(`/chat/${mindMapSet.conversationId}`)
+    } else {
+      router.push('/chat')
+    }
+  }
+
   const tabs = [
     {
       id: 'all',
       label: 'All',
       icon: FileText,
-      count: generatedContent.filter(c => !c.isGenerating).length + flashcardSets.filter(f => !f.metadata?.isGenerating).length
+      count: generatedContent.filter(c => !c.isGenerating).length + flashcardSets.filter(f => !f.metadata?.isGenerating).length + quizSets.filter(q => !q.metadata?.isGenerating).length + mindMapSets.filter(m => !m.metadata?.isGenerating).length
     },
     {
       id: 'documents',
@@ -385,6 +495,18 @@ export function DashboardTabs({
       label: 'Flashcards',
       icon: CreditCard,
       count: flashcardSets.filter(f => !f.metadata?.isGenerating).length
+    },
+    {
+      id: 'quizzes',
+      label: 'Quizzes',
+      icon: HelpCircle,
+      count: quizSets.filter(q => !q.metadata?.isGenerating).length
+    },
+    {
+      id: 'mindmaps',
+      label: 'Mind Maps',
+      icon: Network,
+      count: mindMapSets.filter(m => !m.metadata?.isGenerating).length
     }
   ]
 
@@ -429,34 +551,35 @@ export function DashboardTabs({
   }
 
   return (
-    <div className="px-8 py-6 border-b border-border">
-      <div className="space-y-6">
+    <div className="px-8 pb-8">
+      <div className="space-y-5">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          {/* Tab Navigation */}
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
-            <TabsList className="grid grid-cols-4 w-full lg:w-auto bg-muted/50 p-1 h-12 min-w-0">
-              {tabs.map((tab) => {
-                const Icon = tab.icon
-                return (
+          {/* Section header */}
+          <div className="flex items-center justify-between gap-4 mb-4 flex-wrap">
+            <div className="flex items-center gap-1">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-widest">
+                Your library
+              </p>
+              <TabsList className="ml-3 bg-muted/60 p-0.5 h-8 gap-0.5">
+                {tabs.map((tab) => (
                   <TabsTrigger
                     key={tab.id}
                     value={tab.id}
-                    className="flex items-center gap-1 lg:gap-2 px-2 lg:px-4 py-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-md transition-all dark:data-[state=active]:bg-gradient-to-r dark:data-[state=active]:from-teal-600 dark:data-[state=active]:to-teal-700 min-w-0"
+                    className="h-7 px-3 text-xs data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-foreground text-muted-foreground rounded-md transition-all"
                   >
-                    <Icon className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-medium text-sm lg:text-base truncate">{tab.label}</span>
+                    {tab.label}
                     {tab.count > 0 && (
-                      <span className="text-xs bg-background/20 px-1.5 py-0.5 rounded flex-shrink-0">
+                      <span className="ml-1.5 text-[10px] bg-muted/80 data-[state=active]:bg-muted px-1 py-0.5 rounded-sm">
                         {tab.count}
                       </span>
                     )}
                   </TabsTrigger>
-                )
-              })}
-            </TabsList>
+                ))}
+              </TabsList>
+            </div>
 
             {/* Controls */}
-            <div className="flex items-center gap-2 lg:gap-3">
+            <div className="flex items-center gap-2">
               {/* Collapsible Search */}
               <div ref={searchRef} className="relative flex items-center">
                 <AnimatePresence mode="wait">
@@ -470,13 +593,13 @@ export function DashboardTabs({
                       className="flex items-center"
                     >
                       <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <Input
                           type="text"
-                          placeholder="Search content..."
+                          placeholder="Search..."
                           value={searchQuery}
                           onChange={(e) => handleSearch(e.target.value)}
-                          className="w-48 lg:w-60 pl-9 bg-background/50 border-border"
+                          className="w-44 pl-9 h-8 text-sm bg-background border-border"
                           autoFocus
                         />
                       </div>
@@ -484,12 +607,12 @@ export function DashboardTabs({
                         variant="ghost"
                         size="icon"
                         onClick={toggleSearch}
-                        className="h-10 w-10 ml-1 hover:bg-muted flex-shrink-0"
+                        className="h-8 w-8 ml-1 flex-shrink-0"
                       >
                         {searchQuery ? (
-                          <X className="h-4 w-4" />
+                          <X className="h-3.5 w-3.5" />
                         ) : (
-                          <ChevronLeft className="h-4 w-4" />
+                          <ChevronLeft className="h-3.5 w-3.5" />
                         )}
                       </Button>
                     </motion.div>
@@ -505,61 +628,55 @@ export function DashboardTabs({
                         variant="outline"
                         size="icon"
                         onClick={toggleSearch}
-                        className="h-10 w-10 flex-shrink-0 dark:border-teal-600/40 dark:text-teal-300 dark:hover:bg-teal-600/10 dark:hover:text-teal-200 dark:hover:border-teal-500/60"
+                        className="h-8 w-8 flex-shrink-0"
                       >
-                        <Search className="h-4 w-4" />
+                        <Search className="h-3.5 w-3.5" />
                       </Button>
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
 
-              {/* Filter */}
-              <Button variant="outline" size="icon" className="h-10 w-10 flex-shrink-0 dark:border-teal-600/40 dark:text-teal-300 dark:hover:bg-teal-600/10 dark:hover:text-teal-200 dark:hover:border-teal-500/60">
-                <Filter className="h-4 w-4" />
-              </Button>
-
               {/* View Mode Toggle */}
-              <div className="flex items-center border rounded-lg overflow-hidden flex-shrink-0">
+              <div className="flex items-center border border-border rounded-lg overflow-hidden flex-shrink-0">
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => handleViewModeChange('grid')}
                   className={cn(
-                    "h-10 w-10 rounded-none",
-                    viewMode === 'grid' ? 'bg-primary text-primary-foreground dark:bg-gradient-to-r dark:from-teal-600 dark:to-teal-700' : 'hover:bg-muted'
+                    "h-8 w-8 rounded-none",
+                    viewMode === 'grid' ? 'bg-muted text-foreground' : 'hover:bg-muted/50 text-muted-foreground'
                   )}
                 >
-                  <Grid3x3 className="h-4 w-4" />
+                  <Grid3x3 className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => handleViewModeChange('list')}
                   className={cn(
-                    "h-10 w-10 rounded-none",
-                    viewMode === 'list' ? 'bg-primary text-primary-foreground dark:bg-gradient-to-r dark:from-teal-600 dark:to-teal-700' : 'hover:bg-muted'
+                    "h-8 w-8 rounded-none",
+                    viewMode === 'list' ? 'bg-muted text-foreground' : 'hover:bg-muted/50 text-muted-foreground'
                   )}
                 >
-                  <List className="h-4 w-4" />
+                  <List className="h-3.5 w-3.5" />
                 </Button>
               </div>
 
               {/* Upload Button */}
               <Button
                 onClick={() => {
-                  // First expand the files panel to show upload progress
                   if (typeof window !== 'undefined') {
                     window.dispatchEvent(new CustomEvent('expand-files-panel'))
-                    // Small delay to let panel start opening, then trigger upload
                     setTimeout(() => {
                       window.dispatchEvent(new CustomEvent('open-document-upload'))
                     }, 100)
                   }
                 }}
-                className="h-10 px-3 lg:px-4 bg-primary text-primary-foreground hover:bg-primary/90 button-primary dark:bg-gradient-to-r dark:from-teal-600 dark:to-teal-700 dark:hover:from-teal-700 dark:hover:to-teal-800 flex-shrink-0"
+                size="sm"
+                className="h-8 px-3 text-xs gap-1.5 flex-shrink-0"
               >
-                <Plus className="h-4 w-4 mr-1 lg:mr-2" />
+                <Plus className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Upload PDF</span>
                 <span className="sm:hidden">Upload</span>
               </Button>
@@ -569,7 +686,7 @@ export function DashboardTabs({
           {/* Tab Content */}
           {tabs.map((tab) => (
             <TabsContent key={tab.id} value={tab.id} className="mt-0">
-              <div className="min-h-[400px] rounded-xl border border-border/50 bg-card/50 p-6">
+              <div className="min-h-[320px]">
                 {isInitialLoad ? (
                   /* Loading State - Show beautiful skeleton */
                   <motion.div
@@ -586,20 +703,24 @@ export function DashboardTabs({
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3 }}
-                    className="flex flex-col items-center justify-center h-full text-center py-12"
+                    className="flex flex-col items-center justify-center text-center py-16"
                   >
-                    <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center mb-6">
-                      <tab.icon className="h-10 w-10 text-muted-foreground" />
+                    <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-4">
+                      <tab.icon className="h-6 w-6 text-muted-foreground" />
                     </div>
-                    <h3 className="text-xl font-semibold mb-2">
-                      {tab.id === 'all' && "Your AI study hub awaits"}
-                      {tab.id === 'documents' && "Ready to generate study magic"}
+                    <h3 className="text-base font-semibold mb-1.5 text-foreground">
+                      {tab.id === 'all' && "No study materials yet"}
+                      {tab.id === 'documents' && "No documents yet"}
                       {tab.id === 'flashcards' && "No flashcard decks yet"}
+                      {tab.id === 'quizzes' && "No quizzes yet"}
+                      {tab.id === 'mindmaps' && "No mind maps yet"}
                     </h3>
-                    <p className="text-muted-foreground max-w-md">
-                      {tab.id === 'all' && "Upload a document to generate summaries, notes, study guides, and flashcards—all your AI-powered study materials will appear here"}
-                      {tab.id === 'documents' && "Transform your documents into study guides, smart summaries, and organized notes using advanced AI"}
-                      {tab.id === 'flashcards' && "Create interactive flashcard sets from your study materials for effective memorization and review"}
+                    <p className="text-sm text-muted-foreground max-w-sm">
+                      {tab.id === 'all' && "Upload a PDF and generate study guides, flashcards, quizzes, mind maps, and more."}
+                      {tab.id === 'documents' && "Generate study guides, smart summaries, and notes from your uploaded documents."}
+                      {tab.id === 'flashcards' && "Create flashcard decks from your study materials for effective review."}
+                      {tab.id === 'quizzes' && "Generate quizzes from your study plan or documents to test real understanding."}
+                      {tab.id === 'mindmaps' && "Generate mind maps to see concepts, relationships, and weak areas visually."}
                     </p>
                   </motion.div>
                 ) : (
@@ -639,6 +760,32 @@ export function DashboardTabs({
                             />
                           </motion.div>
                         ))}
+                        {quizzes.map((quizSet, index) => (
+                          <motion.div
+                            key={quizSet.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: (studyTools.length + flashcards.length + index) * 0.05 }}
+                          >
+                            <QuizCard
+                              quizSet={quizSet}
+                              onClick={() => handleQuizClick(quizSet)}
+                            />
+                          </motion.div>
+                        ))}
+                        {mindMaps.map((mindMapSet, index) => (
+                          <motion.div
+                            key={mindMapSet.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.3, delay: (studyTools.length + flashcards.length + quizzes.length + index) * 0.05 }}
+                          >
+                            <MindMapCard
+                              mindMapSet={mindMapSet}
+                              onClick={() => handleMindMapClick(mindMapSet)}
+                            />
+                          </motion.div>
+                        ))}
                       </div>
                     ) : (
                       /* List View */
@@ -666,6 +813,32 @@ export function DashboardTabs({
                             <FlashcardListItem
                               flashcardSet={flashcardSet}
                               onClick={() => handleFlashcardClick(flashcardSet)}
+                            />
+                          </motion.div>
+                        ))}
+                        {quizzes.map((quizSet, index) => (
+                          <motion.div
+                            key={quizSet.id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.2, delay: (studyTools.length + flashcards.length + index) * 0.03 }}
+                          >
+                            <QuizCard
+                              quizSet={quizSet}
+                              onClick={() => handleQuizClick(quizSet)}
+                            />
+                          </motion.div>
+                        ))}
+                        {mindMaps.map((mindMapSet, index) => (
+                          <motion.div
+                            key={mindMapSet.id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.2, delay: (studyTools.length + flashcards.length + quizzes.length + index) * 0.03 }}
+                          >
+                            <MindMapCard
+                              mindMapSet={mindMapSet}
+                              onClick={() => handleMindMapClick(mindMapSet)}
                             />
                           </motion.div>
                         ))}
