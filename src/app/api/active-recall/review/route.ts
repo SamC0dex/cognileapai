@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body: ReviewRequest = await req.json()
-    const { cardId, rating, responseTimeMs, sessionId } = body
+    const { cardId, rating, responseTimeMs, sessionId, undo, previousState } = body
 
     if (!cardId || rating === undefined || !sessionId || responseTimeMs === undefined) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -29,6 +29,93 @@ export async function POST(req: NextRequest) {
 
     if (fetchError || !card) {
       return NextResponse.json({ error: 'Card not found' }, { status: 404 })
+    }
+
+    if (undo) {
+      if (!previousState) {
+        return NextResponse.json({ error: 'Missing previous card state for undo' }, { status: 400 })
+      }
+
+      const { data: restoredCard, error: restoreError } = await supabase
+        .from('review_cards')
+        .update({
+          ease_factor: previousState.ease_factor,
+          interval_days: previousState.interval_days,
+          repetitions: previousState.repetitions,
+          next_review_at: previousState.next_review_at,
+          last_reviewed_at: previousState.last_reviewed_at,
+          recall_layer: previousState.recall_layer,
+          total_reviews: previousState.total_reviews,
+          correct_reviews: previousState.correct_reviews,
+          consecutive_correct: previousState.consecutive_correct,
+          average_response_time_ms: previousState.average_response_time_ms,
+          lapse_count: previousState.lapse_count,
+        })
+        .eq('id', cardId)
+        .eq('user_id', user.id)
+        .select()
+        .single()
+
+      if (restoreError) {
+        console.error('[ActiveRecall] Undo card restore error:', restoreError)
+        return NextResponse.json({ error: 'Failed to undo card rating' }, { status: 500 })
+      }
+
+      const { data: session } = await supabase
+        .from('review_sessions')
+        .select('results, cards_reviewed, cards_correct, cards_incorrect')
+        .eq('id', sessionId)
+        .eq('user_id', user.id)
+        .single()
+
+      if (session) {
+        const results = ((session.results || []) as ReviewSessionResult[])
+        const removeIndex = [...results]
+          .reverse()
+          .findIndex((result) => result.card_id === cardId && result.rating === rating)
+        const actualIndex = removeIndex >= 0 ? results.length - 1 - removeIndex : -1
+        const removed = actualIndex >= 0 ? results[actualIndex] : null
+        const updatedResults = actualIndex >= 0
+          ? results.filter((_, index) => index !== actualIndex)
+          : results
+        const removedWasCorrect = removed ? removed.rating >= 3 : rating >= 3
+
+        await supabase
+          .from('review_sessions')
+          .update({
+            results: updatedResults,
+            cards_reviewed: Math.max(0, (session.cards_reviewed || 0) - (removed ? 1 : 0)),
+            cards_correct: Math.max(0, (session.cards_correct || 0) - (removedWasCorrect && removed ? 1 : 0)),
+            cards_incorrect: Math.max(0, (session.cards_incorrect || 0) - (!removedWasCorrect && removed ? 1 : 0)),
+          })
+          .eq('id', sessionId)
+          .eq('user_id', user.id)
+      }
+
+      const { data: streak } = await supabase
+        .from('user_streaks')
+        .select('total_cards_reviewed')
+        .eq('user_id', user.id)
+        .single()
+
+      if (streak) {
+        await supabase
+          .from('user_streaks')
+          .update({
+            total_cards_reviewed: Math.max(0, (streak.total_cards_reviewed || 0) - 1),
+          })
+          .eq('user_id', user.id)
+      }
+
+      const response: ReviewResponse = {
+        updatedCard: restoredCard,
+        newInterval: formatInterval(previousState.interval_days),
+        layerChange: previousState.recall_layer !== card.recall_layer
+          ? { from: card.recall_layer, to: previousState.recall_layer }
+          : null,
+      }
+
+      return NextResponse.json(response)
     }
 
     // Run SM-2 algorithm

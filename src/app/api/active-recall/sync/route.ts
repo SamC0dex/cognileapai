@@ -20,51 +20,50 @@ export async function POST(req: NextRequest) {
 
     console.log(`[ActiveRecall] Syncing ${cards.length} ${sourceType} cards for user ${user.id}`)
 
-    let synced = 0
-    let existing = 0
+    const sourceIds = cards.map((card) => card.id)
+    const { data: existingCards, error: existingFetchError } = await supabase
+      .from('review_cards')
+      .select('source_id')
+      .eq('user_id', user.id)
+      .eq('source_type', sourceType)
+      .in('source_id', sourceIds)
 
-    // Upsert cards — ON CONFLICT do nothing (preserve existing SM-2 state)
-    for (const card of cards) {
+    if (existingFetchError) {
+      console.error('[ActiveRecall] Existing card lookup error:', existingFetchError)
+      return NextResponse.json({ error: 'Failed to check existing cards' }, { status: 500 })
+    }
+
+    const existingIds = new Set((existingCards || []).map((card) => card.source_id))
+    const newCards = cards.filter((card) => !existingIds.has(card.id))
+    let synced = 0
+
+    // Insert only new cards. Existing cards preserve their SM-2 state and content.
+    for (const card of newCards) {
       const { error } = await supabase
         .from('review_cards')
-        .upsert(
-          {
-            user_id: user.id,
-            source_type: sourceType,
-            source_id: card.id,
-            source_set_id: sourceSetId,
-            document_id: documentId || null,
-            plan_id: planId || null,
-            question: card.question,
-            answer: card.answer,
-            options: card.options || null,
-            correct_answer: card.correctAnswer ?? null,
-            topic: card.topic || null,
-            difficulty: card.difficulty || null,
-          },
-          {
-            onConflict: 'user_id,source_type,source_id',
-            ignoreDuplicates: true,
-          }
-        )
+        .insert({
+          user_id: user.id,
+          source_type: sourceType,
+          source_id: card.id,
+          source_set_id: sourceSetId,
+          document_id: documentId || null,
+          plan_id: planId || null,
+          question: card.question,
+          answer: card.answer,
+          options: card.options || null,
+          correct_answer: card.correctAnswer ?? null,
+          topic: card.topic || null,
+          difficulty: card.difficulty || null,
+        })
 
       if (error) {
-        console.error('[ActiveRecall] Upsert error for card:', card.id, error)
-        existing++
+        console.error('[ActiveRecall] Insert error for card:', card.id, error)
       } else {
         synced++
       }
     }
 
-    // If some were ignored due to conflict, count them as existing
-    // Check how many actually exist now
-    const { count } = await supabase
-      .from('review_cards')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .eq('source_set_id', sourceSetId)
-
-    // Ensure plan_id is set on all cards for this source set (including pre-existing ones)
+    // Ensure plan_id is set on all cards for this source set, including pre-existing ones.
     if (planId) {
       await supabase
         .from('review_cards')
@@ -74,16 +73,19 @@ export async function POST(req: NextRequest) {
         .is('plan_id', null)
     }
 
-    existing = (count || 0) - synced
-    if (existing < 0) existing = 0
+    const { count } = await supabase
+      .from('review_cards')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('source_set_id', sourceSetId)
 
     const response: SyncResponse = {
       synced,
-      existing: Math.max(0, existing),
+      existing: existingIds.size,
       total: count || synced,
     }
 
-    console.log(`[ActiveRecall] Sync complete:`, response)
+    console.log('[ActiveRecall] Sync complete:', response)
 
     return NextResponse.json(response)
   } catch (error) {

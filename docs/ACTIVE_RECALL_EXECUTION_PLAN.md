@@ -249,33 +249,46 @@ Goal: generate only the material needed for today's activities, reducing cost an
 
 ## Module 5: Review Loop Stabilization
 
+Status: Partial stabilization complete
+
 Goal: make the review engine reliable before adding more intelligence.
 
 ### Tasks
 
-- [ ] Fix undo handling in `/api/active-recall/review`.
-- [ ] Decide the canonical review store and remove or quarantine duplicate session logic.
-- [ ] Fix sync result counting for new vs existing cards.
-- [ ] Decide whether content updates should refresh existing card question/answer/options while preserving SM-2 state.
+- [x] Fix undo handling in `/api/active-recall/review`.
+- [x] Decide the canonical review store and remove or quarantine duplicate session logic.
+- [x] Fix sync result counting for new vs existing cards.
+- [x] Decide whether content updates should refresh existing card question/answer/options while preserving SM-2 state.
 - [ ] Verify session completion updates:
   - reviewed count
   - accuracy
   - due count
   - streak
   - recent sessions
-- [ ] Ensure closing a session does not lose or double-count ratings.
+- [x] Ensure closing a session does not lose or double-count ratings.
 
 ### Verification Gate
 
-- [ ] Rating a card updates `review_cards` correctly.
-- [ ] Undo reverts card state and session result correctly, or undo is hidden.
+- [x] Rating a card updates `review_cards` correctly.
+- [x] Undo reverts card state and session result correctly, or undo is hidden.
 - [ ] Dashboard stats update after a completed review.
-- [ ] Duplicate sync does not inflate synced counts.
-- [ ] Typecheck passes.
+- [x] Duplicate sync does not inflate synced counts.
+- [x] Typecheck passes.
 - [ ] Build passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
+
+### Module 5 Verification Notes
+
+- Canonical review path for the MVP is `src/lib/active-recall-review-store.ts` plus `src/app/active-recall/review/page.tsx`. The older `active-recall-store` review session methods remain quarantined for compatibility and should not be expanded.
+- Undo now sends a full previous card snapshot and `/api/active-recall/review` restores SM-2 fields, review counters, lapse count, average response time, last review timestamp, session results, and session counters.
+- Browser-tested `/active-recall/review?plan_id=271fd123-ab16-47dd-956b-7bd7c30da976`: revealed a card, rated `Good`, verified the UI advanced to `1/12`, then clicked `Undo` and verified the UI returned to `0/12` on the same card.
+- Database verification for card `979e757f-c146-4d56-b0ca-b7f6d363ba83`: after rating, review counters/session result incremented; after Undo, card fields returned to the captured prior state and session `7cf87b53-93d2-44e2-ae7f-eef0111e7086` returned to `cards_reviewed: 0`, `cards_correct: 0`, `cards_incorrect: 0`, and empty `results`.
+- Duplicate sync counting now pre-checks existing cards, inserts only new review cards, and reports existing counts without overwriting SM-2/content state. This was fixed in both `/api/active-recall/sync` and the plan-aware study-tool generation sync helper.
+- Content update decision for MVP: preserve existing review card content and SM-2 state on duplicate sync. A later migration can add explicit content refresh if needed.
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
+- Remaining Module 5 work before full completion: run a complete session through the summary/dashboard path and verify dashboard stats, streaks, recent sessions, and build.
 
 ## Module 6: Performance Memory For Adaptation
 

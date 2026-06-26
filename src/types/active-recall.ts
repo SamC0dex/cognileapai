@@ -234,6 +234,8 @@ export interface ReviewRequest {
   rating: SM2Rating
   responseTimeMs: number
   sessionId: string
+  undo?: boolean
+  previousState?: ReviewUndoEntry['previousCardState']
 }
 
 export interface ReviewResponse {
@@ -373,7 +375,12 @@ export interface ReviewUndoEntry {
     repetitions: number
     recall_layer: RecallLayer
     next_review_at: string
+    last_reviewed_at: string | null
+    total_reviews: number
+    correct_reviews: number
     consecutive_correct: number
+    average_response_time_ms: number | null
+    lapse_count: number
   }
 }
 

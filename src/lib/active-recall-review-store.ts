@@ -137,7 +137,12 @@ export const useReviewStore = create<ReviewStore>()((set, get) => ({
         repetitions: card.repetitions,
         recall_layer: card.recall_layer,
         next_review_at: card.next_review_at,
+        last_reviewed_at: card.last_reviewed_at,
+        total_reviews: card.total_reviews,
+        correct_reviews: card.correct_reviews,
         consecutive_correct: card.consecutive_correct,
+        average_response_time_ms: card.average_response_time_ms,
+        lapse_count: card.lapse_count,
       },
     }
 
@@ -190,7 +195,6 @@ export const useReviewStore = create<ReviewStore>()((set, get) => ({
     )
     const groupCardIds = new Set(groupCards.map((c) => c.id))
 
-    const now = Date.now()
     const results: ReviewSessionResult[] = []
 
     // Rate each card in the group via API
