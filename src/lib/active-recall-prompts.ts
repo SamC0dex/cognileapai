@@ -213,6 +213,10 @@ export interface PlanPerformance {
   planTitle: string
   accuracy: number
   cardsReviewed: number
+  readinessScore?: number
+  readinessLabel?: string
+  dueCards?: number
+  nextFocus?: string
   weakTopics: string[]
   strongTopics: string[]
 }
@@ -263,7 +267,7 @@ ${planList}
 ${ctx.planPerformance && ctx.planPerformance.length > 0 ? `
 ## Plan Performance
 ${ctx.planPerformance.map((p) =>
-  `  - "${p.planTitle}": ${p.accuracy}% accuracy, ${p.cardsReviewed} cards reviewed, weak: ${p.weakTopics.join(', ') || 'none'}, strong: ${p.strongTopics.join(', ') || 'none'}`
+  `  - "${p.planTitle}": ${p.readinessLabel ? `${p.readinessLabel} (${p.readinessScore}%)` : `${p.accuracy}% accuracy`}, ${p.cardsReviewed} cards reviewed, ${p.dueCards ?? 0} due, next focus: ${p.nextFocus || 'continue plan'}, weak: ${p.weakTopics.join(', ') || 'none'}, strong: ${p.strongTopics.join(', ') || 'none'}`
 ).join('\n')}` : ''}
 
 ## ACTION PROTOCOL

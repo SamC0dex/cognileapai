@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 8 complete; ready for Module 9
+Status: Module 9 complete; ready for Module 10
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -420,26 +420,38 @@ Goal: add simple reminders that support the plan without becoming the main proje
 
 ## Module 9: Predictive Readiness
 
+Status: Complete
+
 Goal: provide enough prediction to help the agent and user decide what to study next.
 
 ### Tasks
 
-- [ ] Audit predictive analytics implementation.
-- [ ] Provide a simple readiness score per plan/document.
-- [ ] Provide weak topic list.
-- [ ] Provide estimated due load.
-- [ ] Provide suggested next focus.
-- [ ] Show only lightweight user-facing UI unless the core flow is already complete.
+- [x] Audit predictive analytics implementation.
+- [x] Provide a simple readiness score per plan/document.
+- [x] Provide weak topic list.
+- [x] Provide estimated due load.
+- [x] Provide suggested next focus.
+- [x] Show only lightweight user-facing UI unless the core flow is already complete.
 
 ### Verification Gate
 
-- [ ] Agent can use readiness data for plan adaptation.
-- [ ] User can see a simple "ready / needs work" signal.
-- [ ] No large dashboard work blocks completion.
-- [ ] Typecheck passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] Agent can use readiness data for plan adaptation.
+- [x] User can see a simple "ready / needs work" signal.
+- [x] No large dashboard work blocks completion.
+- [x] Typecheck passes.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
+
+### Module 9 Notes
+
+- Added `buildActiveRecallReadiness` to summarize plan/document readiness from the active learning context: score, ready/needs-work/needs-data status, reason, due load, weak topics, and next focus.
+- Added authenticated `/api/active-recall/readiness` with `plan_id` and `document_id` scoping so both UI and agent routes can use the same readiness contract.
+- Added lightweight readiness chips to active plan cards. The dashboard now shows a compact `Ready`, `Needs work`, or `Needs data` signal plus the score and next focus without turning readiness into a heavy analytics page.
+- Wired readiness into the Study Agent chat context so adaptation prompts see readiness score, due load, next focus, weak topics, and review volume for each active plan.
+- Removed the leftover fixed `Daily Goal` dashboard stat after Module 8 settings cleanup. The dashboard now keeps only due cards, streak, and mastery as quick stats.
+- Browser verification: `/active-recall` showed readiness labels (`Needs work`, `Needs data`) and next-focus copy on active plan cards, while `Daily Goal` no longer appeared in the dashboard stats.
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
 
 ## Module 10: Final Demo Hardening
 

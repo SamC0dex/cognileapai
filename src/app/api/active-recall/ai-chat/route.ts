@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { routedCompletionStream, type ResolvedAIConfig } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
 import { buildAgentSystemPrompt, buildAIChatSystemPrompt, type AgentContext, type AIChatContext, type PlanPerformance } from '@/lib/active-recall-prompts'
+import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
+import { buildActiveRecallReadiness } from '@/lib/active-recall-readiness'
 import { RecallLayer } from '@/types/active-recall'
 import type { ChatMessage, TokenUsage } from '@/lib/ai-providers'
 
@@ -159,52 +161,24 @@ export async function POST(req: NextRequest) {
       // Compute per-plan performance from review_cards
       const planPerformance: PlanPerformance[] = []
       if (activePlans.length > 0) {
-        // Group cards by plan_id
-        const cardsByPlan = new Map<string, typeof allCards>()
-        allCards.forEach((c) => {
-          if (!c.document_id) return
-          // Cards with plan associations can be identified by checking document overlap
-          // For now, compute for all cards in plan-linked documents
-        })
-
-        // Fetch plan-linked cards directly
         for (const ap of activePlans.slice(0, 3)) {
-          const { data: planCards } = await supabase
-            .from('review_cards')
-            .select('topic, correct_reviews, total_reviews')
-            .eq('user_id', user.id)
-            .eq('plan_id', ap.id)
-
-          if (planCards && planCards.length > 0) {
-            let pCorrect = 0, pTotal = 0
-            const pTopicStats = new Map<string, { correct: number; total: number }>()
-            planCards.forEach((c) => {
-              pCorrect += c.correct_reviews || 0
-              pTotal += c.total_reviews || 0
-              const t = c.topic || 'General'
-              const ex = pTopicStats.get(t) || { correct: 0, total: 0 }
-              ex.correct += c.correct_reviews || 0
-              ex.total += c.total_reviews || 0
-              pTopicStats.set(t, ex)
-            })
-
-            const pWeak: string[] = []
-            const pStrong: string[] = []
-            pTopicStats.forEach((s, t) => {
-              if (s.total < 2) return
-              const acc = (s.correct / s.total) * 100
-              if (acc < 65) pWeak.push(t)
-              else if (acc > 85) pStrong.push(t)
-            })
-
+          try {
+            const learningContext = await buildActiveRecallLearningContext(supabase, user.id, { planId: ap.id })
+            const readiness = buildActiveRecallReadiness(learningContext)
             planPerformance.push({
               planId: ap.id,
               planTitle: ap.title,
-              accuracy: pTotal > 0 ? Math.round((pCorrect / pTotal) * 100) : 0,
-              cardsReviewed: pTotal,
-              weakTopics: pWeak,
-              strongTopics: pStrong,
+              accuracy: learningContext.summary.accuracy || 0,
+              cardsReviewed: learningContext.summary.totalReviews,
+              readinessScore: readiness.score,
+              readinessLabel: readiness.label,
+              dueCards: readiness.dueLoad.totalDue,
+              nextFocus: readiness.nextFocus,
+              weakTopics: readiness.weakTopics.map((topic) => topic.topic),
+              strongTopics: learningContext.strongTopics.map((topic) => topic.topic),
             })
+          } catch (error) {
+            console.error('[AIChat] Plan readiness context error:', error)
           }
         }
       }

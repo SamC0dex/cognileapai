@@ -4,8 +4,6 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
-  TrendingUp,
-  TrendingDown,
   Clock,
   Timer,
   ArrowUpRight,
@@ -102,17 +100,6 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
 
   const dueToday = stats?.totalDue ?? 0
 
-  // Daily goal from today's sessions
-  const dailyGoalTarget = 20
-  const dailyGoalCompleted = (() => {
-    if (!stats?.recentSessions) return 0
-    const todayStart = new Date()
-    todayStart.setHours(0, 0, 0, 0)
-    return stats.recentSessions
-      .filter((s) => new Date(s.started_at) >= todayStart)
-      .reduce((sum, s) => sum + (s.cards_reviewed || 0), 0)
-  })()
-
   const handleStartReview = () => {
     router.push('/active-recall/review')
   }
@@ -159,8 +146,6 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
         dueToday={dueToday}
         streak={stats?.reviewStreak ?? 0}
         mastery={stats?.masteryPct ?? 0}
-        dailyGoalCompleted={dailyGoalCompleted}
-        dailyGoalTarget={dailyGoalTarget}
       />
 
       {/* Active Study Plans */}

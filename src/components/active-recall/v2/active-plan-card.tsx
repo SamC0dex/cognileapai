@@ -15,6 +15,7 @@ import {
   ScrollText,
   RotateCcw,
   AlertCircle,
+  ShieldCheck,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -73,6 +74,23 @@ interface TodayData {
   }
 }
 
+interface ReadinessData {
+  score: number
+  status: 'ready' | 'needs_work' | 'not_enough_data'
+  label: string
+  reason: string
+  nextFocus: string
+  dueLoad: {
+    totalDue: number
+    overdue: number
+  }
+  weakTopics: Array<{
+    topic: string
+    accuracy: number | null
+    dueCount: number
+  }>
+}
+
 interface ActivePlanCardProps {
   plan: {
     id: string
@@ -89,6 +107,7 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
   const router = useRouter()
   const [todayData, setTodayData] = useState<TodayData | null>(null)
   const [planData, setPlanData] = useState<PlanCardData | null>(null)
+  const [readiness, setReadiness] = useState<ReadinessData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
   // Edit states
@@ -103,11 +122,18 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
 
   const fetchToday = async () => {
     try {
-      const res = await fetch(`/api/active-recall/agent/today?plan_id=${plan.id}`)
-      if (res.ok) {
-        const data = await res.json()
+      const [todayRes, readinessRes] = await Promise.all([
+        fetch(`/api/active-recall/agent/today?plan_id=${plan.id}`),
+        fetch(`/api/active-recall/readiness?plan_id=${plan.id}`),
+      ])
+      if (todayRes.ok) {
+        const data = await todayRes.json()
         setPlanData(data.plan)
         setTodayData({ today: data.today, dueCards: data.dueCards })
+      }
+      if (readinessRes.ok) {
+        const data = await readinessRes.json()
+        setReadiness(data.readiness)
       }
     } catch (e) {
       console.error('[ActivePlanCard] Error:', e)
@@ -281,6 +307,28 @@ export function ActivePlanCard({ plan, onDeleted }: ActivePlanCardProps) {
                 transition={{ duration: 0.5, delay: 0.2 }}
               />
             </div>
+
+            {readiness && (
+              <div className={cn(
+                'mt-3 rounded-lg border px-3 py-2 text-xs',
+                readiness.status === 'ready' && 'border-green-200 bg-green-50 text-green-700 dark:border-green-900/60 dark:bg-green-950/20 dark:text-green-300',
+                readiness.status === 'needs_work' && 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-300',
+                readiness.status === 'not_enough_data' && 'border-border bg-muted/30 text-muted-foreground',
+              )}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                    {readiness.status === 'ready' ? (
+                      <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <span className="truncate">{readiness.label}</span>
+                  </span>
+                  <span className="shrink-0 font-semibold">{readiness.score}%</span>
+                </div>
+                <p className="mt-1 truncate text-[11px] opacity-85">{readiness.nextFocus}</p>
+              </div>
+            )}
           </div>
         </div>
 

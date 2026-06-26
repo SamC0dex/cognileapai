@@ -1,15 +1,13 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Target, Flame, Zap, Clock } from 'lucide-react'
+import { Target, Flame, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface QuickStatsRowProps {
   dueToday: number
   streak: number
   mastery: number
-  dailyGoalCompleted: number
-  dailyGoalTarget: number
   className?: string
 }
 
@@ -17,8 +15,6 @@ export function QuickStatsRow({
   dueToday,
   streak,
   mastery,
-  dailyGoalCompleted,
-  dailyGoalTarget,
   className,
 }: QuickStatsRowProps) {
   const pills = [
@@ -43,17 +39,10 @@ export function QuickStatsRow({
       color: 'text-green-500',
       bg: 'bg-green-500/10',
     },
-    {
-      icon: Zap,
-      label: 'Daily Goal',
-      value: `${dailyGoalCompleted}/${dailyGoalTarget}`,
-      color: dailyGoalCompleted >= dailyGoalTarget ? 'text-green-500' : 'text-blue-500',
-      bg: dailyGoalCompleted >= dailyGoalTarget ? 'bg-green-500/10' : 'bg-blue-500/10',
-    },
   ]
 
   return (
-    <div className={cn('grid grid-cols-2 md:grid-cols-4 gap-3', className)}>
+    <div className={cn('grid grid-cols-1 sm:grid-cols-3 gap-3', className)}>
       {pills.map((pill, i) => {
         const Icon = pill.icon
         return (
