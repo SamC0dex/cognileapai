@@ -340,6 +340,18 @@ export default function PlanDetailPage() {
     fetchPlan()
   }, [fetchPlan])
 
+  useEffect(() => {
+    const handleAgentAction = (event: Event) => {
+      const detail = (event as CustomEvent<{ type?: string; planId?: string }>).detail
+      if (detail?.type === 'ADAPT_PLAN' && detail?.planId === id) {
+        fetchPlan()
+      }
+    }
+
+    window.addEventListener('agent-action-completed', handleAgentAction)
+    return () => window.removeEventListener('agent-action-completed', handleAgentAction)
+  }, [fetchPlan, id])
+
   const handleRename = async () => {
     if (!renameValue.trim() || !plan) return
     try {

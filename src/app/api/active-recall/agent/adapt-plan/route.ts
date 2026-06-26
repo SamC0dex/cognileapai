@@ -68,7 +68,11 @@ export async function POST(req: NextRequest) {
     planCreated.setHours(0, 0, 0, 0)
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const currentDay = Math.max(1, Math.floor((today.getTime() - planCreated.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    const computedCurrentDay = Math.max(1, Math.floor((today.getTime() - planCreated.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    const storedCurrentDay = typeof plan.current_day === 'number' && plan.current_day > 0
+      ? plan.current_day
+      : null
+    const currentDay = Math.min(schedule.length, storedCurrentDay || computedCurrentDay)
 
     // Adapt only future days. Completed/current days are immutable in this module.
     const remainingSchedule = schedule.filter((d: { day: number }) => d.day > currentDay)
@@ -122,6 +126,10 @@ export async function POST(req: NextRequest) {
 
     if (!adaptedSchedule.length) {
       return NextResponse.json({ message: 'AI returned empty schedule', adapted: false })
+    }
+
+    if (adaptedSchedule.some((day) => day.day <= currentDay)) {
+      return NextResponse.json({ error: 'Adapted schedule attempted to rewrite completed days' }, { status: 500 })
     }
 
     // Merge: keep completed days, replace remaining with adapted

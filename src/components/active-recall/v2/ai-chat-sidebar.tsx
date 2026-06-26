@@ -56,7 +56,7 @@ interface Conversation {
 // Agent Action Types
 // ============================================
 
-type AgentActionType = 'CHECK_TOOLS' | 'GENERATE_TOOLS' | 'SYNC_CARDS' | 'CREATE_PLAN' | 'START_REVIEW'
+type AgentActionType = 'CHECK_TOOLS' | 'GENERATE_TOOLS' | 'SYNC_CARDS' | 'CREATE_PLAN' | 'ADAPT_PLAN' | 'START_REVIEW'
 
 interface AgentAction {
   id: string
@@ -177,9 +177,24 @@ const SUGGESTED_QUESTIONS = [
   'I want to study a document',
   'Create a study plan for my exam',
   'What should I study today?',
+  'Adjust my current plan',
   'How is my progress overall?',
   'Help me review weak topics',
 ]
+
+function getCurrentPlanId(): string | null {
+  if (typeof window === 'undefined') return null
+  const match = window.location.pathname.match(/^\/active-recall\/plan\/([^/]+)/)
+  return match?.[1] || null
+}
+
+function isPlanAdaptationRequest(text: string): boolean {
+  const normalized = text.toLowerCase()
+  const intentWords = ['adapt', 'adjust', 'change', 'rebalance', 'reschedule', 'modify', 'easier', 'harder', 'lighter', 'more focus', 'weak']
+  const planWords = ['plan', 'tomorrow', 'future', 'upcoming', 'next day', 'next days', 'schedule']
+  return intentWords.some((word) => normalized.includes(word))
+    && planWords.some((word) => normalized.includes(word))
+}
 
 const panelSpring = {
   type: 'spring' as const,
@@ -527,6 +542,25 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
           break
         }
 
+        case 'ADAPT_PLAN': {
+          const planId = action.payload.planId as string || getCurrentPlanId()
+          const request = action.payload.request as string
+          if (!planId) {
+            result = { error: 'Open a study plan before asking me to adapt it.' }
+            break
+          }
+
+          const res = await fetch('/api/active-recall/agent/adapt-plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ planId, request }),
+            signal: AbortSignal.timeout(90000),
+          })
+          const data = await res.json().catch(() => null)
+          result = res.ok ? data : { error: data?.error || `Failed to adapt plan (${res.status})` }
+          break
+        }
+
         case 'START_REVIEW': {
           const planId = action.payload.planId as string
           window.location.href = `/active-recall/review${planId ? `?plan_id=${planId}` : ''}`
@@ -562,7 +596,7 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
 
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent('agent-action-completed', {
-            detail: { type: action.type, result, documentId: actionDocumentId, documentIds: actionDocumentIds },
+            detail: { type: action.type, result, documentId: actionDocumentId, documentIds: actionDocumentIds, planId: action.payload.planId },
           }))
           window.dispatchEvent(new CustomEvent('study-tools-refresh', {
             detail: { documentId: actionDocumentId, documentIds: actionDocumentIds },
@@ -621,17 +655,6 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
       currentConvoId = newConvo.id
     }
 
-    // Prepend selected document context to message if docs are selected
-    let messageContent = text.trim()
-    if (selectedDocuments.length > 0) {
-      const docNames = selectedDocuments.map((d) => d.title).join(', ')
-      const docIds = selectedDocuments.map((d) => d.id)
-      // Only prepend on first message or when context changes
-      if (messages.length === 0) {
-        messageContent = `[Selected documents: ${docNames} (IDs: ${docIds.join(', ')})]\n\n${messageContent}`
-      }
-    }
-
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -642,6 +665,31 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
     const updatedMessages = [...messages, userMessage]
     setMessages(updatedMessages)
     setInput('')
+
+    const currentPlanIdForAdaptation = getCurrentPlanId()
+    if (currentPlanIdForAdaptation && isPlanAdaptationRequest(text)) {
+      const assistantId = crypto.randomUUID()
+      const action: AgentAction = {
+        id: `action-0-${Date.now()}`,
+        type: 'ADAPT_PLAN',
+        payload: { planId: currentPlanIdForAdaptation, request: text.trim() },
+        status: 'pending',
+      }
+
+      setMessages([
+        ...updatedMessages,
+        {
+          id: assistantId,
+          role: 'assistant',
+          content: 'I will adapt the upcoming study days based on your request. Today and completed work will stay unchanged.',
+          timestamp: new Date().toISOString(),
+          actions: [action],
+        },
+      ])
+      handleAgentAction(action, assistantId)
+      return
+    }
+
     setIsStreaming(true)
 
     const assistantId = crypto.randomUUID()
@@ -1398,6 +1446,11 @@ const ACTION_CARD_CONFIG: Record<AgentActionType, { label: string; icon: React.R
     icon: <TreePine className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />,
     iconBg: 'bg-emerald-500/10',
   },
+  ADAPT_PLAN: {
+    label: 'Adapting study plan',
+    icon: <Sparkles className="h-3 w-3 text-primary" />,
+    iconBg: 'bg-primary/10',
+  },
   START_REVIEW: {
     label: 'Starting review session',
     icon: <Play className="h-3 w-3 text-green-600 dark:text-green-400" />,
@@ -1417,6 +1470,8 @@ function getActionDescription(action: AgentAction): string {
       return `Syncing ${action.payload.sourceType} cards`
     case 'CREATE_PLAN':
       return (action.payload.title as string) || 'New study plan'
+    case 'ADAPT_PLAN':
+      return 'Updating future days'
     case 'START_REVIEW':
       return 'Launching review session'
     default:
@@ -1475,6 +1530,18 @@ function ActionResult({ action }: { action: AgentAction }) {
       return (
         <p className="mt-1.5 text-emerald-600 dark:text-emerald-400">
           Plan created: {plan.title as string} — {plan.totalActivities as number} activities
+        </p>
+      )
+    }
+    case 'ADAPT_PLAN': {
+      const adapted = result.adapted as boolean
+      const explanation = result.explanation as string | undefined
+      return (
+        <p className={cn(
+          'mt-1.5',
+          adapted ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
+        )}>
+          {adapted ? explanation || 'Future days adapted.' : result.message as string || 'No future days needed changes.'}
         </p>
       )
     }

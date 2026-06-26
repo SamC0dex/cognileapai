@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 6 complete; ready for Module 7
+Status: Module 7 complete; ready for Module 8
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -337,7 +337,7 @@ Goal: store and expose enough performance context for the agent to adapt future 
 
 ## Module 7: User-Requested Plan Adaptation
 
-Status: In progress
+Status: Complete
 
 Goal: allow the user to ask the agent to adjust future study work based on performance.
 
@@ -356,13 +356,13 @@ Goal: allow the user to ask the agent to adjust future study work based on perfo
 
 ### Verification Gate
 
-- [ ] Adaptation changes future plan activities.
-- [ ] Completed activities are not rewritten.
-- [ ] User sees a clear explanation of what changed.
-- [ ] Typecheck passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] Adaptation changes future plan activities.
+- [x] Completed activities are not rewritten.
+- [x] User sees a clear explanation of what changed.
+- [x] Typecheck passes.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
 
 ### Module 7 Notes
 
@@ -371,8 +371,11 @@ Goal: allow the user to ask the agent to adjust future study work based on perfo
 - The API now returns a plain-language explanation summarizing the requested change, weak-topic focus, strong-topic maintenance, and number of future days rewritten.
 - Refactored the Module 6 context logic into `src/lib/active-recall-learning-context.ts`; both `/api/active-recall/agent/learning-context` and `adapt-plan` now use the same performance memory.
 - Created controlled smoke plan `7ff14be2-2359-40f3-8f7b-9d95d693f9cf` with completed day 1, future days 2-3, and copied review-card performance data for safe adaptation testing.
-- Verification so far: `pnpm typecheck` passed, `pnpm lint` passed with pre-existing warnings, and unauthenticated POST to `/api/active-recall/agent/adapt-plan` returns `401`.
-- Browser POST verification through a temporary form was blocked by the in-app browser security policy, so full end-to-end route mutation still needs either a normal authenticated UI action or a test plan created through the app surface.
+- Plan adaptation is now a Study Agent conversational action (`ADAPT_PLAN`), not a separate plan-page button, so the user asks the agent naturally and sees progress/result in the agent action card.
+- The plan page listens for completed `ADAPT_PLAN` agent actions and refreshes the schedule after adaptation.
+- Browser verification used the authenticated plan page and Study Agent chat: request "Adjust the upcoming plan to make tomorrow lighter and focus more on weak topics." produced an `Adapting study plan` action card, completed successfully, and showed the plain-language explanation in the agent conversation.
+- Database verification for smoke plan `7ff14be2-2359-40f3-8f7b-9d95d693f9cf`: `current_day` stayed `1`, day 1 remained the completed `Completed baseline` activity with notes unchanged, and future days 2-3 were rewritten with weak-topic work.
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
 
 ## Module 8: Notifications
 
