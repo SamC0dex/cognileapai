@@ -54,7 +54,7 @@ export const MindMapViewer: React.FC<MindMapViewerProps> = ({
   className,
 }) => {
   const [layoutStyle, setLayoutStyle] = useState<'radial' | 'tree' | 'organic'>(
-    mindMapSet.options.visualStyle || 'radial'
+    mindMapSet.options?.visualStyle || 'radial'
   )
   const [selectedNode, setSelectedNode] = useState<Node<FlowNodeData> | null>(null)
 

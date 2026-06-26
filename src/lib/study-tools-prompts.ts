@@ -465,8 +465,9 @@ Source Material:
 ## CRITICAL REQUIREMENTS:
 - **Output ONLY valid JSON** matching the exact schema below — no markdown, no code fences, no introductory text
 - **Each node must have**: id (unique string), label (3-8 words), detail (1-3 sentence explanation), optional emoji (single emoji as visual mnemonic)
-- **Respect depth strictly**: the "children" nesting must not exceed the requested depth
+- **Adaptive depth**: if a depth is requested, do not exceed it; otherwise let the source material decide the depth
 - **Balance branches**: aim for roughly equal branch sizes; avoid lopsided trees
+- **Never make token maps**: a meaningful document mind map should not be a 3-5 node sketch unless the source is truly tiny
 
 ## NODE DESIGN PRINCIPLES:
 
@@ -540,8 +541,8 @@ Source Material:
 
 ## GENERATION REQUIREMENTS:
 - Document Title: {documentTitle}
-- Depth: {depth} levels
-- Detail Level: {detailLevel}
+- Depth Guidance: {depthGuidance}
+- Detail Guidance: {detailGuidance}
 - Focus Area: {focusArea}
 
 ## CUSTOM INSTRUCTIONS (HIGHEST PRIORITY):
@@ -549,11 +550,11 @@ Source Material:
 
 **CRITICAL REMINDERS**:
 1. Output ONLY the JSON object — no markdown, no code fences, no explanatory text
-2. Respect the depth limit strictly (do not nest deeper than {depth} levels)
+2. Use adaptive depth unless a maximum depth is explicitly requested
 3. Generate a balanced tree — avoid branches with only 1 child
 4. Each node needs: id, label, detail, and emoji
 5. If focus area is specified, center the map on that topic
-6. Follow the detail level precisely
+6. Follow the detail guidance and source complexity; do not produce a tiny map for substantial material
 
 Generate the mind map JSON now.`
   }
@@ -588,40 +589,51 @@ export function getStudyToolPrompt(
     .replace('{documentTitle}', documentTitle)
 
   // Handle flashcard-specific replacements
-  if (toolType === 'flashcards' && flashcardOptions) {
-    const cardCount = FLASHCARD_COUNTS[flashcardOptions.numberOfCards as keyof typeof FLASHCARD_COUNTS]
-    const cardCountText = `${cardCount.min}-${cardCount.max} cards (${flashcardOptions.numberOfCards})`
+  if (toolType === 'flashcards') {
+    const cardCount = flashcardOptions
+      ? FLASHCARD_COUNTS[flashcardOptions.numberOfCards as keyof typeof FLASHCARD_COUNTS]
+      : null
+    const cardCountText = cardCount
+      ? `${cardCount.min}-${cardCount.max} cards (${flashcardOptions?.numberOfCards})`
+      : 'Adaptive. Generate enough cards to cover the planned topic and source complexity without padding or arbitrary limits.'
 
     userPrompt = userPrompt
       .replace('{numberOfCards}', cardCountText)
-      .replace('{difficulty}', flashcardOptions.difficulty)
-      .replace('{customInstructions}', flashcardOptions.customInstructions || 'No specific instructions provided.')
+      .replace('{difficulty}', flashcardOptions?.difficulty || 'Adaptive to the study plan, topic difficulty, and learner context.')
+      .replace('{customInstructions}', flashcardOptions?.customInstructions || 'No specific instructions provided.')
   }
 
   // Handle quiz-specific replacements
-  if (toolType === 'quiz' && quizOptions) {
+  if (toolType === 'quiz') {
     let questionCountText: string
-    if (quizOptions.numberOfQuestions === 'custom' && quizOptions.customCount) {
+    if (quizOptions?.numberOfQuestions === 'custom' && quizOptions.customCount) {
       questionCountText = `exactly ${quizOptions.customCount} questions (custom)`
-    } else {
+    } else if (quizOptions) {
       const quizCount = QUIZ_COUNTS[quizOptions.numberOfQuestions as keyof typeof QUIZ_COUNTS]
       questionCountText = `${quizCount.min}-${quizCount.max} questions (${quizOptions.numberOfQuestions})`
+    } else {
+      questionCountText = 'Adaptive. Generate enough questions to test the planned topic and source complexity without padding or arbitrary limits.'
     }
 
     userPrompt = userPrompt
       .replace('{numberOfQuestions}', questionCountText)
-      .replace('{difficulty}', quizOptions.difficulty)
-      .replace('{customInstructions}', quizOptions.customInstructions || 'No specific instructions provided.')
+      .replace('{difficulty}', quizOptions?.difficulty || 'Adaptive to the study plan, topic difficulty, and learner context.')
+      .replace('{customInstructions}', quizOptions?.customInstructions || 'No specific instructions provided.')
   }
 
   // Handle mind-map-specific replacements
-  if (toolType === 'mind-map' && mindMapOptions) {
+  if (toolType === 'mind-map') {
+    const depthGuidance = mindMapOptions?.depth
+      ? `Maximum ${mindMapOptions.depth} levels. Do not nest deeper than this.`
+      : 'Adaptive. Choose enough levels to represent the source material clearly.'
+    const detailGuidance = mindMapOptions?.detailLevel
+      ? mindMapOptions.detailLevel
+      : 'Adaptive. Use brief labels plus specific details; use more detail for dense or exam-relevant concepts.'
     userPrompt = userPrompt
-      .replace('{depth}', String(mindMapOptions.depth))
-      .replace('{depth}', String(mindMapOptions.depth)) // second occurrence
-      .replace('{detailLevel}', mindMapOptions.detailLevel)
-      .replace('{focusArea}', mindMapOptions.focusArea || 'No specific focus — cover the main topics from the document')
-      .replace('{customInstructions}', mindMapOptions.customInstructions || 'No specific instructions provided.')
+      .replace('{depthGuidance}', depthGuidance)
+      .replace('{detailGuidance}', detailGuidance)
+      .replace('{focusArea}', mindMapOptions?.focusArea || 'No specific focus — cover the main topics from the document')
+      .replace('{customInstructions}', mindMapOptions?.customInstructions || 'No specific instructions provided.')
   }
 
   return {

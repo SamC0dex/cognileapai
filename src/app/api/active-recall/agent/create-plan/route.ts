@@ -670,20 +670,6 @@ Generate the ${daysCount}-day study schedule as JSON. Remember: EXACTLY ${daysCo
       return NextResponse.json({ error: 'Failed to save plan' }, { status: 500 })
     }
 
-    // Link existing review cards to this plan
-    if (totalCards > 0) {
-      const { data: linkedCards, error: linkError } = await supabase
-        .from('review_cards')
-        .update({ plan_id: plan.id })
-        .eq('user_id', user.id)
-        .in('document_id', planDocumentIds)
-        .is('plan_id', null)
-        .select('id')
-
-      console.log(`[CreatePlan] Linked ${linkedCards?.length || 0} of ${totalCards} cards to plan ${plan.id}`)
-      if (linkError) console.error('[CreatePlan] Link error:', linkError)
-    }
-
     return NextResponse.json({
       plan: {
         id: plan.id,

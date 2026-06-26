@@ -1,8 +1,8 @@
 export interface MindMapOptions {
-  depth: 2 | 3 | 4
-  detailLevel: 'keywords' | 'brief' | 'detailed'
+  depth?: 2 | 3 | 4
+  detailLevel?: 'keywords' | 'brief' | 'detailed'
   focusArea?: string
-  visualStyle: 'radial' | 'tree' | 'organic'
+  visualStyle?: 'radial' | 'tree' | 'organic'
   customInstructions?: string
 }
 

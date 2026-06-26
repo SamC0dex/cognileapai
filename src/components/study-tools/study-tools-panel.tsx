@@ -1272,20 +1272,25 @@ const ExpandedPanel: React.FC<{
               className="h-full"
             />
           </motion.div>
-        ) : isMindMapViewerOpen && currentMindMapSet && !isMindMapFullscreen ? (
+        ) : isMindMapViewerOpen && currentMindMapSet ? (
           <motion.div
             key="mindmap"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.05 } }}
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isMindMapFullscreen
+                ? 'fixed inset-0 z-50'
+                : 'flex-1'
+            )}
           >
             <LazyMindMapViewer
               mindMapSet={currentMindMapSet}
               title={currentMindMapSet.title}
               onClose={closeMindMapViewer}
-              isFullscreen={false}
+              isFullscreen={isMindMapFullscreen}
               onToggleFullscreen={toggleMindMapFullscreen}
               className="h-full"
             />
@@ -2042,19 +2047,24 @@ const EmbeddedStudyToolsContent: React.FC<{
               className="h-full"
             />
           </motion.div>
-        ) : isMindMapViewerOpen && currentMindMapSet && !isMindMapFullscreen ? (
+        ) : isMindMapViewerOpen && currentMindMapSet ? (
           <motion.div
             key="mindmap"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isMindMapFullscreen
+                ? 'fixed inset-0 z-50'
+                : 'flex-1'
+            )}
           >
             <LazyMindMapViewer
               mindMapSet={currentMindMapSet}
               title={currentMindMapSet.title}
               onClose={closeMindMapViewer}
-              isFullscreen={false}
+              isFullscreen={isMindMapFullscreen}
               onToggleFullscreen={toggleMindMapFullscreen}
               className="h-full"
             />

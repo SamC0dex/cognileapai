@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 9 complete; ready for Module 10
+Status: Module 10 complete; Active Recall MVP rescue complete
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -455,29 +455,43 @@ Goal: provide enough prediction to help the agent and user decide what to study 
 
 ## Module 10: Final Demo Hardening
 
+Status: Complete
+
 Goal: make the hero feature demoable without fragile paths.
 
 ### Tasks
 
-- [ ] Run through a full document-to-plan-to-generation-to-review demo.
-- [ ] Fix visible UI confusion.
-- [ ] Hide incomplete tabs or features that distract from the core loop.
-- [ ] Ensure empty/loading/error states are clear.
-- [ ] Keep copy aligned with the broad Active Recall promise:
+- [x] Run through a full document-to-plan-to-generation-to-review demo.
+- [x] Fix visible UI confusion.
+- [x] Hide incomplete tabs or features that distract from the core loop.
+- [x] Ensure empty/loading/error states are clear.
+- [x] Keep copy aligned with the broad Active Recall promise:
   - understand
   - practice
   - remember
-- [ ] Avoid introducing new major features.
+- [x] Avoid introducing new major features.
 
 ### Verification Gate
 
-- [ ] `pnpm typecheck` passes.
-- [ ] `pnpm build` passes.
-- [ ] Full manual demo passes.
-- [ ] This file is updated with final module statuses.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] `pnpm typecheck` passes.
+- [x] `pnpm build` passes.
+- [x] Full manual demo passes.
+- [x] This file is updated with final module statuses.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
+
+### Module 10 Notes
+
+- Removed legacy Active Recall card attachment paths that contradicted the on-demand plan flow. New plans no longer silently link all old unlinked document cards, and plan detail no longer auto-syncs old mind map outputs into a plan.
+- Fixed mind map fullscreen persistence in both study tools panel modes by keeping the mind map viewer mounted and promoting it to a fixed full-window overlay when fullscreen is active.
+- Strengthened Active Recall mind map review fullscreen with a higher overlay layer and explicit close/exit handling.
+- Fixed Study Agent chat stream parsing so split network chunks are line-buffered before JSON parsing. This prevents random chat failures when a streamed `0:` or `3:` line arrives across chunk boundaries.
+- Changed agent-driven material generation to be adaptive by default. Flashcards, quizzes, and mind maps now let the study plan, source complexity, and user context determine quantity/depth unless the user explicitly customizes options.
+- Mind maps now receive adaptive depth/detail guidance and an explicit instruction not to create tiny placeholder maps for substantial material.
+- Browser verification: `/active-recall` rendered without console errors, Study Agent opened, a smoke-test message sent without the fallback failure message, and dashboard quick stats/readiness remained visually consistent.
+- Browser verification limitation: no existing visible mind map set was available in the current app state, and the in-app browser read-only scope did not expose local storage for injecting a temporary set. Fullscreen fix was verified by code path, typecheck, lint, and build.
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings; `pnpm build` passed with the known Supabase Edge Runtime warning.
 
 ## Deferred Work
 

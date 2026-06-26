@@ -375,10 +375,10 @@ interface StudyToolGenerateRequest {
   }
   // Mind map-specific options
   mindMapOptions?: {
-    depth: 2 | 3 | 4
-    detailLevel: 'keywords' | 'brief' | 'detailed'
+    depth?: 2 | 3 | 4
+    detailLevel?: 'keywords' | 'brief' | 'detailed'
     focusArea?: string
-    visualStyle: 'radial' | 'tree' | 'organic'
+    visualStyle?: 'radial' | 'tree' | 'organic'
     customInstructions?: string
     batchTopics?: string[]  // Generate multiple focused mindmaps in one request
   }

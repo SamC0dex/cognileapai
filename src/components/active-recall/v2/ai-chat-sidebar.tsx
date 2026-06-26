@@ -392,10 +392,8 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
               // For mind maps with topics: pass them as batch in one request
               if (toolType === 'mind-map' && topics?.length) {
                 body.mindMapOptions = {
-                  depth: 3,
-                  detailLevel: 'brief',
-                  visualStyle: 'radial',
                   batchTopics: topics,
+                  customInstructions: 'Build each map at the size and depth the source material deserves. Do not make tiny placeholder maps.',
                 }
               }
               const res = await fetch('/api/study-tools/generate', {
@@ -453,7 +451,7 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
               } else if (toolType === 'mind-map' && data.mindMapData) {
                 const { useMindMapStore } = await import('@/lib/mindmap-store')
                 const mindMapStore = useMindMapStore.getState()
-                const mindMapOptions = { depth: 3 as const, detailLevel: 'brief' as const, visualStyle: 'radial' as const }
+                const mindMapOptions = { visualStyle: 'radial' as const }
 
                 // If batch response, add all mind maps
                 if (data.batchMindMaps && Array.isArray(data.batchMindMaps)) {
@@ -818,15 +816,22 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
 
       const decoder = new TextDecoder()
       let accumulated = ''
+      let lineBuffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          lineBuffer += decoder.decode()
+          break
+        }
 
         const text = decoder.decode(value, { stream: true })
-        const lines = text.split('\n').filter(Boolean)
+        lineBuffer += text
+        const lines = lineBuffer.split('\n')
+        lineBuffer = lines.pop() || ''
 
         for (const line of lines) {
+          if (!line.trim()) continue
           if (line.startsWith('0:')) {
             const chunk = JSON.parse(line.slice(2))
             accumulated += chunk
@@ -842,6 +847,22 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
             const error = JSON.parse(line.slice(2))
             throw new Error(error)
           }
+        }
+      }
+
+      if (lineBuffer.trim()) {
+        if (lineBuffer.startsWith('0:')) {
+          const chunk = JSON.parse(lineBuffer.slice(2))
+          accumulated += chunk
+          const { cleanText } = parseActions(accumulated)
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: cleanText } : m
+            )
+          )
+        } else if (lineBuffer.startsWith('3:')) {
+          const error = JSON.parse(lineBuffer.slice(2))
+          throw new Error(error)
         }
       }
 

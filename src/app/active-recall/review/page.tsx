@@ -1379,13 +1379,14 @@ function MindMapReviewView({
   // Fullscreen overlay
   if (mapFullscreen) {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex flex-col">
-        <div className="flex-1">
+      <div className="fixed inset-0 z-[70] bg-background flex flex-col">
+        <div className="flex-1 min-h-0">
           <LazyMindMapViewer
             mindMapSet={mindMapSet}
             title={title}
             isFullscreen
             onToggleFullscreen={() => setMapFullscreen(false)}
+            onClose={() => setMapFullscreen(false)}
             className="h-full"
           />
         </div>

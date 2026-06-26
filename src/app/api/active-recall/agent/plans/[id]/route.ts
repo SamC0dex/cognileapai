@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { buildMindMapSyncPayload } from '@/lib/active-recall-mindmap-sync'
-import type { MindMapData } from '@/types/mindmap'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -19,14 +17,6 @@ function activityMatchesCompletedTypes(activityType: string, completedTypes: str
   }
 
   return (equivalents[activityType] || []).some((type) => completedTypes.includes(type))
-}
-
-function planHasExplicitGenerationState(schedule: Array<{ activities?: Array<{ generationStatus?: unknown }> }>) {
-  return schedule.some((day) =>
-    (day.activities || []).some((activity) =>
-      activity.generationStatus !== undefined && activity.generationStatus !== null
-    )
-  )
 }
 
 // GET /api/active-recall/agent/plans/[id] — full plan with schedule
@@ -53,7 +43,6 @@ export async function GET(req: NextRequest, { params }: Params) {
     const schedule = typeof plan.schedule === 'string'
       ? JSON.parse(plan.schedule)
       : plan.schedule
-    const isOnDemandPlan = planHasExplicitGenerationState(schedule)
 
     // Calculate current day
     const planCreated = new Date(plan.created_at)
@@ -64,68 +53,11 @@ export async function GET(req: NextRequest, { params }: Params) {
     const displayCurrentDay = Math.min(currentDay, schedule.length || currentDay)
 
     // Get card counts per source type for this plan
-    let { data: cards } = await supabase
+    const { data: cards } = await supabase
       .from('review_cards')
       .select('source_type, recall_layer, next_review_at')
       .eq('user_id', user.id)
       .eq('plan_id', id)
-
-    // Legacy auto-sync: old plans predate activity generation state and expected
-    // existing document material to attach automatically. New on-demand plans must
-    // not pull in unrelated old cards before the user generates an activity.
-    if (!isOnDemandPlan && (!cards || cards.length === 0) && plan.document_ids?.length) {
-      console.log(`[PlanDetail] Plan ${id} has 0 cards, attempting auto-sync for docs: ${plan.document_ids}`)
-      try {
-        // Sync mindmaps from outputs
-        const { data: mmOutputs } = await supabase
-          .from('outputs')
-          .select('id, payload, document_id')
-          .eq('type', 'mind_map')
-          .in('document_id', plan.document_ids)
-
-        for (const mm of mmOutputs || []) {
-          const payload = typeof mm.payload === 'string' ? JSON.parse(mm.payload) : mm.payload
-          const mindMapData: MindMapData | undefined = payload?.mindMapData
-          if (!mindMapData?.branches) continue
-
-          const syncPayload = buildMindMapSyncPayload(mm.id, mindMapData, mm.document_id)
-          for (const card of syncPayload.cards) {
-            await supabase.from('review_cards').upsert({
-              user_id: user.id,
-              source_type: 'mindmap',
-              source_id: card.id,
-              source_set_id: mm.id,
-              document_id: mm.document_id || null,
-              plan_id: id,
-              question: card.question,
-              answer: card.answer,
-              topic: card.topic || null,
-              difficulty: card.difficulty || null,
-            }, { onConflict: 'user_id,source_type,source_id', ignoreDuplicates: false })
-          }
-        }
-
-        // Link any unlinked cards for these documents to this plan
-        await supabase
-          .from('review_cards')
-          .update({ plan_id: id })
-          .eq('user_id', user.id)
-          .in('document_id', plan.document_ids)
-          .is('plan_id', null)
-
-        // Re-fetch cards
-        const { data: refreshedCards } = await supabase
-          .from('review_cards')
-          .select('source_type, recall_layer, next_review_at')
-          .eq('user_id', user.id)
-          .eq('plan_id', id)
-        cards = refreshedCards
-
-        console.log(`[PlanDetail] Auto-sync complete: ${cards?.length || 0} cards now linked`)
-      } catch (syncErr) {
-        console.error('[PlanDetail] Auto-sync error:', syncErr)
-      }
-    }
 
     const totalCards = cards?.length || 0
     const dueCards = cards?.filter(c => new Date(c.next_review_at) <= new Date()).length || 0
