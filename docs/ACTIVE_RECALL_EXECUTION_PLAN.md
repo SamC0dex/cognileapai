@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 4 checkpoint complete; ready for Module 5
+Status: Module 5 complete; ready for Module 6
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -249,7 +249,7 @@ Goal: generate only the material needed for today's activities, reducing cost an
 
 ## Module 5: Review Loop Stabilization
 
-Status: Partial stabilization complete
+Status: Complete
 
 Goal: make the review engine reliable before adding more intelligence.
 
@@ -259,7 +259,7 @@ Goal: make the review engine reliable before adding more intelligence.
 - [x] Decide the canonical review store and remove or quarantine duplicate session logic.
 - [x] Fix sync result counting for new vs existing cards.
 - [x] Decide whether content updates should refresh existing card question/answer/options while preserving SM-2 state.
-- [ ] Verify session completion updates:
+- [x] Verify session completion updates:
   - reviewed count
   - accuracy
   - due count
@@ -271,10 +271,10 @@ Goal: make the review engine reliable before adding more intelligence.
 
 - [x] Rating a card updates `review_cards` correctly.
 - [x] Undo reverts card state and session result correctly, or undo is hidden.
-- [ ] Dashboard stats update after a completed review.
+- [x] Dashboard stats update after a completed review.
 - [x] Duplicate sync does not inflate synced counts.
 - [x] Typecheck passes.
-- [ ] Build passes.
+- [x] Build passes.
 - [x] User-flow/browser verification completed before checkpoint commit.
 - [x] UI/UX review completed before checkpoint commit.
 - [x] Module checkpoint commit created.
@@ -288,7 +288,10 @@ Goal: make the review engine reliable before adding more intelligence.
 - Duplicate sync counting now pre-checks existing cards, inserts only new review cards, and reports existing counts without overwriting SM-2/content state. This was fixed in both `/api/active-recall/sync` and the plan-aware study-tool generation sync helper.
 - Content update decision for MVP: preserve existing review card content and SM-2 state on duplicate sync. A later migration can add explicit content refresh if needed.
 - Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
-- Remaining Module 5 work before full completion: run a complete session through the summary/dashboard path and verify dashboard stats, streaks, recent sessions, and build.
+- Completed full-session browser verification after a clean reload: rated 12 due cards from the smoke plan, reached `Session Complete`, saw `100% Accuracy`, `12/12 Correct`, `1m 28s Time`, `1 Streak`, and `4 cards promoted`.
+- Database verification for session `843b4883-786a-4ce8-bff1-412ba9aea9eb`: `cards_reviewed: 12`, `cards_correct: 12`, `cards_incorrect: 0`, `resultsCount: 12`, completed timestamp present, and plan due count dropped to `0`.
+- Dashboard verification after session: Recent Sessions showed the new `100%`, `12 cards`, `4 leveled up` session, and plan cards no longer showed the smoke-plan due cards.
+- Build verification: `pnpm build` passed with the known non-blocking Supabase Edge Runtime `process.version` warning.
 
 ## Module 6: Performance Memory For Adaptation
 
