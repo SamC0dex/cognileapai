@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 5 complete; ready for Module 6
+Status: Module 6 complete; ready for Module 7
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -295,34 +295,45 @@ Goal: make the review engine reliable before adding more intelligence.
 
 ## Module 6: Performance Memory For Adaptation
 
+Status: Complete
+
 Goal: store and expose enough performance context for the agent to adapt future plan days on request.
 
 ### Minimum Agent Context
 
-- [ ] weak topics
-- [ ] strong topics
-- [ ] missed cards/questions
-- [ ] slow response topics
-- [ ] due load
-- [ ] mastery layer distribution
-- [ ] recent session accuracy
-- [ ] exam/deadline distance
+- [x] weak topics
+- [x] strong topics
+- [x] missed cards/questions
+- [x] slow response topics
+- [x] due load
+- [x] mastery layer distribution
+- [x] recent session accuracy
+- [x] exam/deadline distance
 
 ### Tasks
 
-- [ ] Audit stats, predictive analytics, and session analysis routes.
-- [ ] Create or stabilize one API endpoint the agent can use as learning context.
-- [ ] Keep the output compact and actionable.
-- [ ] Avoid building a large analytics dashboard in this module.
+- [x] Audit stats, predictive analytics, and session analysis routes.
+- [x] Create or stabilize one API endpoint the agent can use as learning context.
+- [x] Keep the output compact and actionable.
+- [x] Avoid building a large analytics dashboard in this module.
 
 ### Verification Gate
 
-- [ ] Agent can fetch a concise learning context for a user/document/plan.
-- [ ] Context includes weak areas from actual performance.
-- [ ] Typecheck passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] Agent can fetch a concise learning context for a user/document/plan.
+- [x] Context includes weak areas from actual performance.
+- [x] Typecheck passes.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
+
+### Module 6 Verification Notes
+
+- Added compact learning context route at `/api/active-recall/agent/learning-context`, with a shared alias at `/api/active-recall/performance` for non-agent callers.
+- Context includes scope, plan deadline/exam timing when present, total/due/overdue cards, mastery layer distribution, recent session accuracy, weak topics, strong topics, missed cards, slow-response topics, due load by topic, and compact topic performance.
+- The route is backend/API-only and adds no new UI surface, so UI/UX verification is limited to confirming no visible Active Recall UI changes were introduced.
+- Service-role verification against smoke plan `271fd123-ab16-47dd-956b-7bd7c30da976` confirmed real performance context: 16 total cards, 0 due after Module 5 review, layer distribution `10` recognizing and `6` retrieving, 100% recent session accuracy, weak candidates including Presentation Layer and BI Architecture, strong candidates including Decision-Making Process, and 10 missed cards from prior history.
+- Route reachability/security check: unauthenticated local request to `/api/active-recall/performance?plan_id=271fd123-ab16-47dd-956b-7bd7c30da976` returned `401`.
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
 
 ## Module 7: User-Requested Plan Adaptation
 
