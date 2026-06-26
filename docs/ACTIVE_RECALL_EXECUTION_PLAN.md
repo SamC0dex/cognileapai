@@ -344,7 +344,7 @@ Goal: allow the user to ask the agent to adjust future study work based on perfo
 ### Tasks
 
 - [x] Audit `agent/adapt-plan`.
-- [ ] Use the performance context from Module 6.
+- [x] Use the performance context from Module 6.
 - [x] Only modify future incomplete activities.
 - [x] Keep completed days immutable.
 - [x] Explain changes to the user in plain language.
@@ -369,8 +369,10 @@ Goal: allow the user to ask the agent to adjust future study work based on perfo
 - `adapt-plan` now accepts a user request string and passes it into the adaptation prompt.
 - Adaptation remains limited to future days; completed/current days are preserved and the response reports the preserved day boundary.
 - The API now returns a plain-language explanation summarizing the requested change, weak-topic focus, strong-topic maintenance, and number of future days rewritten.
-- Verification so far: `pnpm typecheck` passed and `pnpm lint` passed with pre-existing warnings.
-- Full Module 7 verification still needs a plan with actual future days and review data, or a controlled smoke plan, so the route can be tested end to end without mutating the user's old one-day/stale plans.
+- Refactored the Module 6 context logic into `src/lib/active-recall-learning-context.ts`; both `/api/active-recall/agent/learning-context` and `adapt-plan` now use the same performance memory.
+- Created controlled smoke plan `7ff14be2-2359-40f3-8f7b-9d95d693f9cf` with completed day 1, future days 2-3, and copied review-card performance data for safe adaptation testing.
+- Verification so far: `pnpm typecheck` passed, `pnpm lint` passed with pre-existing warnings, and unauthenticated POST to `/api/active-recall/agent/adapt-plan` returns `401`.
+- Browser POST verification through a temporary form was blocked by the in-app browser security policy, so full end-to-end route mutation still needs either a normal authenticated UI action or a test plan created through the app surface.
 
 ## Module 8: Notifications
 

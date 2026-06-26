@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { routedCompletion } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
 import { buildPlanAdaptationPrompt, type PlanAdaptationContext } from '@/lib/active-recall-prompts'
+import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +14,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { planId, request: userRequest } = await req.json()
+    const contentType = req.headers.get('content-type') || ''
+    const requestBody = contentType.includes('application/json')
+      ? await req.json()
+      : Object.fromEntries((await req.formData()).entries())
+    const { planId, request: userRequest } = requestBody as { planId?: string; request?: string }
 
     if (!planId) {
       return NextResponse.json({ error: 'Missing planId' }, { status: 400 })
@@ -31,60 +36,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
 
-    // Fetch all cards linked to this plan
-    const { data: cards } = await supabase
-      .from('review_cards')
-      .select('topic, correct_reviews, total_reviews, average_response_time_ms, recall_layer')
-      .eq('user_id', user.id)
-      .eq('plan_id', planId)
+    const learningContext = await buildActiveRecallLearningContext(supabase, user.id, { planId })
 
-    if (!cards || cards.length === 0) {
+    if (learningContext.summary.totalCards === 0) {
       return NextResponse.json({ message: 'Not enough data to adapt', adapted: false })
     }
 
-    // Compute per-topic performance
-    const topicMap = new Map<string, {
-      correct: number
-      total: number
-      totalResponseMs: number
-      count: number
-    }>()
-
-    for (const card of cards) {
-      const topic = card.topic || 'General'
-      const existing = topicMap.get(topic) || { correct: 0, total: 0, totalResponseMs: 0, count: 0 }
-      existing.correct += card.correct_reviews || 0
-      existing.total += card.total_reviews || 0
-      existing.totalResponseMs += (card.average_response_time_ms || 3000) * (card.total_reviews || 1)
-      existing.count++
-      topicMap.set(topic, existing)
-    }
-
-    const topicPerformance = Array.from(topicMap.entries())
-      .filter(([, s]) => s.total >= 2)
-      .map(([topic, s]) => ({
-        topic,
-        accuracy: s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0,
-        totalReviews: s.total,
-        avgResponseTimeMs: s.total > 0 ? Math.round(s.totalResponseMs / s.total) : 3000,
-        cardCount: s.count,
+    const topicPerformance = learningContext.topicPerformance
+      .filter((topic) => topic.totalReviews >= 2)
+      .map((topic) => ({
+        topic: topic.topic,
+        accuracy: topic.accuracy ?? 0,
+        totalReviews: topic.totalReviews,
+        avgResponseTimeMs: topic.avgResponseTimeMs ?? 3000,
+        cardCount: topic.cardCount,
       }))
 
     if (topicPerformance.length === 0) {
       return NextResponse.json({ message: 'Not enough topic data to adapt', adapted: false })
     }
 
-    // Compute overall stats
-    let totalCorrect = 0
-    let totalReviews = 0
-    cards.forEach((c) => {
-      totalCorrect += c.correct_reviews || 0
-      totalReviews += c.total_reviews || 0
-    })
-    const overallAccuracy = totalReviews > 0 ? Math.round((totalCorrect / totalReviews) * 100) : 0
-
-    const weakTopics = topicPerformance.filter((t) => t.accuracy < 65).map((t) => t.topic)
-    const strongTopics = topicPerformance.filter((t) => t.accuracy > 85).map((t) => t.topic)
+    const overallAccuracy = learningContext.summary.accuracy ?? 0
+    const weakTopics = learningContext.weakTopics.map((topic) => topic.topic)
+    const strongTopics = learningContext.strongTopics.map((topic) => topic.topic)
 
     // Parse existing schedule
     const schedule = typeof plan.schedule === 'string' ? JSON.parse(plan.schedule) : plan.schedule
