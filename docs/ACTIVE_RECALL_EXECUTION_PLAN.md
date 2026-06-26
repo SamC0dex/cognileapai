@@ -1,6 +1,6 @@
 # Active Recall Execution Plan
 
-Status: Module 7 complete; ready for Module 8
+Status: Module 8 complete; ready for Module 9
 Owner: Project agents working on CogniLeapAI Active Recall
 Core rule: do not expand scope until the current module is complete and verified.
 
@@ -379,32 +379,44 @@ Goal: allow the user to ask the agent to adjust future study work based on perfo
 
 ## Module 8: Notifications
 
+Status: Complete
+
 Goal: add simple reminders that support the plan without becoming the main project.
 
 ### Required Notifications
 
-- [ ] daily study reminder
-- [ ] due cards reminder
-- [ ] exam countdown reminder if exam date exists
+- [x] daily study reminder
+- [x] due cards reminder
+- [x] exam countdown reminder if exam date exists
 
 ### Tasks
 
-- [ ] Audit notification preference routes and UI.
-- [ ] Confirm push subscription flow works.
-- [ ] Make reminders plan-aware where possible.
-- [ ] Keep quiet hours and timezone behavior correct.
-- [ ] Defer weekly reports.
-- [ ] Defer Telegram polish unless already stable.
+- [x] Audit notification preference routes and UI.
+- [x] Confirm push subscription flow works.
+- [x] Make reminders plan-aware where possible.
+- [x] Keep timezone behavior correct.
+- [x] Defer weekly reports.
+- [x] Defer Telegram polish unless already stable.
 
 ### Verification Gate
 
-- [ ] User can enable/disable reminders.
-- [ ] Timezone is respected.
-- [ ] Daily reminder can point to today's plan.
-- [ ] Typecheck passes.
-- [ ] User-flow/browser verification completed before checkpoint commit.
-- [ ] UI/UX review completed before checkpoint commit.
-- [ ] Module checkpoint commit created.
+- [x] User can enable/disable reminders.
+- [x] Timezone is respected.
+- [x] Daily reminder can point to today's plan.
+- [x] Typecheck passes.
+- [x] User-flow/browser verification completed before checkpoint commit.
+- [x] UI/UX review completed before checkpoint commit.
+- [x] Module checkpoint commit created.
+
+### Module 8 Notes
+
+- Replaced the old settings surface with a lean `Agent Reminders` page: push permission, daily reminder time, timezone, and the agent reminder preview.
+- Removed low-value manual controls from the Active Recall settings page: review preferences, fixed daily goal, max daily notifications, daily summary, weekly report, and quiet hours.
+- Added `/api/active-recall/reminder-preview` to provide plan-aware reminder targets for today's active plan, due-card review, and exam countdown status.
+- Added Study Agent `SET_REMINDERS` action so the user can say "Remind me to study at 8pm every day" and have reminders configured conversationally.
+- Browser verification: settings rendered only the lean agent reminder controls; preview showed the smoke plan route, due-card review route, 20:00 reminder time, timezone `Asia/Calcutta`, and exam countdown placeholder.
+- Browser verification: Study Agent command "Remind me to study at 8pm every day." produced a `Configuring reminders` action card and completed with `Reminders set for 20:00 in Asia/Calcutta.`
+- Verification commands: `pnpm typecheck` passed; `pnpm lint` passed with pre-existing warnings.
 
 ## Module 9: Predictive Readiness
 

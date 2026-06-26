@@ -293,6 +293,10 @@ Available actions:
    <!--ACTION:START_REVIEW:{"planId":"<uuid>"}-->
    Use this to launch a review session for a specific plan.
 
+6. **Configure reminders:**
+   <!--ACTION:SET_REMINDERS:{"dailyReminderTime":"19:00","timezone":"Asia/Calcutta"}-->
+   Use this when the student asks to enable, adjust, or schedule study reminders. Reminders should support today's plan, due-card review, and exam countdowns. If they mention a time like "7pm", convert it to 24-hour HH:mm format.
+
 ## ONBOARDING FLOW
 When a student wants to study something new, follow this flow:
 

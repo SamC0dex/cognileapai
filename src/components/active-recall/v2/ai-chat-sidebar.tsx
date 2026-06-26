@@ -16,6 +16,7 @@ import {
   FileText,
   FlaskConical,
   Play,
+  Bell,
   CheckCircle2,
   AlertCircle,
   Plus,
@@ -56,7 +57,7 @@ interface Conversation {
 // Agent Action Types
 // ============================================
 
-type AgentActionType = 'CHECK_TOOLS' | 'GENERATE_TOOLS' | 'SYNC_CARDS' | 'CREATE_PLAN' | 'ADAPT_PLAN' | 'START_REVIEW'
+type AgentActionType = 'CHECK_TOOLS' | 'GENERATE_TOOLS' | 'SYNC_CARDS' | 'CREATE_PLAN' | 'ADAPT_PLAN' | 'SET_REMINDERS' | 'START_REVIEW'
 
 interface AgentAction {
   id: string
@@ -178,6 +179,7 @@ const SUGGESTED_QUESTIONS = [
   'Create a study plan for my exam',
   'What should I study today?',
   'Adjust my current plan',
+  'Remind me to study at 7pm',
   'How is my progress overall?',
   'Help me review weak topics',
 ]
@@ -194,6 +196,30 @@ function isPlanAdaptationRequest(text: string): boolean {
   const planWords = ['plan', 'tomorrow', 'future', 'upcoming', 'next day', 'next days', 'schedule']
   return intentWords.some((word) => normalized.includes(word))
     && planWords.some((word) => normalized.includes(word))
+}
+
+function parseReminderTime(text: string): string | null {
+  const normalized = text.toLowerCase()
+  const twelveHour = normalized.match(/\b(1[0-2]|0?[1-9])(?::([0-5]\d))?\s*(am|pm)\b/)
+  if (twelveHour) {
+    let hours = Number(twelveHour[1])
+    const minutes = twelveHour[2] || '00'
+    if (twelveHour[3] === 'pm' && hours !== 12) hours += 12
+    if (twelveHour[3] === 'am' && hours === 12) hours = 0
+    return `${String(hours).padStart(2, '0')}:${minutes}`
+  }
+
+  const twentyFourHour = normalized.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/)
+  if (twentyFourHour) {
+    return `${String(Number(twentyFourHour[1])).padStart(2, '0')}:${twentyFourHour[2]}`
+  }
+
+  return null
+}
+
+function isReminderRequest(text: string): boolean {
+  const normalized = text.toLowerCase()
+  return ['remind', 'reminder', 'notification', 'notify', 'push'].some((word) => normalized.includes(word))
 }
 
 const panelSpring = {
@@ -561,6 +587,37 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
           break
         }
 
+        case 'SET_REMINDERS': {
+          const timezone = action.payload.timezone as string || Intl.DateTimeFormat().resolvedOptions().timeZone
+          const payload = {
+            daily_reminder_time: action.payload.dailyReminderTime as string || '09:00',
+            timezone,
+          }
+
+          const res = await fetch('/api/active-recall/notification-preferences', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(30000),
+          })
+          const prefs = await res.json().catch(() => null)
+          if (!res.ok) {
+            result = { error: prefs?.error || `Failed to update reminders (${res.status})` }
+            break
+          }
+
+          const previewRes = await fetch('/api/active-recall/reminder-preview', {
+            signal: AbortSignal.timeout(30000),
+          })
+          const preview = previewRes.ok ? await previewRes.json() : null
+          result = {
+            preferences: prefs?.preferences,
+            preview,
+            needsPushPermission: !preview?.preferences?.hasPushSubscription,
+          }
+          break
+        }
+
         case 'START_REVIEW': {
           const planId = action.payload.planId as string
           window.location.href = `/active-recall/review${planId ? `?plan_id=${planId}` : ''}`
@@ -682,6 +739,32 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
           id: assistantId,
           role: 'assistant',
           content: 'I will adapt the upcoming study days based on your request. Today and completed work will stay unchanged.',
+          timestamp: new Date().toISOString(),
+          actions: [action],
+        },
+      ])
+      handleAgentAction(action, assistantId)
+      return
+    }
+
+    if (isReminderRequest(text)) {
+      const assistantId = crypto.randomUUID()
+      const action: AgentAction = {
+        id: `action-0-${Date.now()}`,
+        type: 'SET_REMINDERS',
+        payload: {
+          dailyReminderTime: parseReminderTime(text) || '09:00',
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        },
+        status: 'pending',
+      }
+
+      setMessages([
+        ...updatedMessages,
+        {
+          id: assistantId,
+          role: 'assistant',
+          content: 'I will configure your reminders around your active plan, due reviews, and exam countdowns.',
           timestamp: new Date().toISOString(),
           actions: [action],
         },
@@ -1451,6 +1534,11 @@ const ACTION_CARD_CONFIG: Record<AgentActionType, { label: string; icon: React.R
     icon: <Sparkles className="h-3 w-3 text-primary" />,
     iconBg: 'bg-primary/10',
   },
+  SET_REMINDERS: {
+    label: 'Configuring reminders',
+    icon: <Bell className="h-3 w-3 text-blue-600 dark:text-blue-400" />,
+    iconBg: 'bg-blue-500/10',
+  },
   START_REVIEW: {
     label: 'Starting review session',
     icon: <Play className="h-3 w-3 text-green-600 dark:text-green-400" />,
@@ -1472,6 +1560,8 @@ function getActionDescription(action: AgentAction): string {
       return (action.payload.title as string) || 'New study plan'
     case 'ADAPT_PLAN':
       return 'Updating future days'
+    case 'SET_REMINDERS':
+      return `${action.payload.dailyReminderTime as string || '09:00'} daily`
     case 'START_REVIEW':
       return 'Launching review session'
     default:
@@ -1543,6 +1633,30 @@ function ActionResult({ action }: { action: AgentAction }) {
         )}>
           {adapted ? explanation || 'Future days adapted.' : result.message as string || 'No future days needed changes.'}
         </p>
+      )
+    }
+    case 'SET_REMINDERS': {
+      const preview = result.preview as {
+        reminders?: Array<{ id: string; title: string; enabled: boolean }>
+        preferences?: { dailyReminderTime?: string; timezone?: string }
+      } | undefined
+      const needsPushPermission = result.needsPushPermission as boolean
+      return (
+        <div className="mt-1.5 space-y-1">
+          <p className="text-green-600 dark:text-green-400">
+            Reminders set for {preview?.preferences?.dailyReminderTime || '09:00'}{preview?.preferences?.timezone ? ` in ${preview.preferences.timezone}` : ''}.
+          </p>
+          {preview?.reminders?.slice(0, 3).map((reminder) => (
+            <p key={reminder.id} className="text-[11px] text-muted-foreground">
+              {reminder.enabled ? 'On' : 'Preview'}: {reminder.title}
+            </p>
+          ))}
+          {needsPushPermission && (
+            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+              Browser push still needs permission in Active Recall settings.
+            </p>
+          )}
+        </div>
       )
     }
     default:
