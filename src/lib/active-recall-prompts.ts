@@ -390,6 +390,7 @@ Rules:
 
 export interface PlanAdaptationContext {
   planTitle: string
+  userRequest?: string
   currentDay: number
   totalDays: number
   remainingSchedule: Array<{
@@ -445,9 +446,10 @@ Rules:
     `  Day ${d.day} (${d.date}): ${d.activities.map((a) => `${a.type}:${a.topic}(${a.cardCount ?? a.plannedMinutes ?? 0})`).join(', ')}`
   ).join('\n')
 
-  const userContent = `Adapt this study plan based on performance:
+  const userContent = `Adapt this study plan based on performance and the user's request.
 
 Plan: ${ctx.planTitle}
+User request: ${ctx.userRequest || 'Improve the remaining plan based on weak topics and recent performance.'}
 Progress: Day ${ctx.currentDay} of ${ctx.totalDays} (${ctx.daysRemaining} days remaining)
 Overall accuracy: ${ctx.overallAccuracy}%
 Weak topics: ${ctx.weakTopics.join(', ') || 'none'}

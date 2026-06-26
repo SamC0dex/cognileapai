@@ -337,16 +337,18 @@ Goal: store and expose enough performance context for the agent to adapt future 
 
 ## Module 7: User-Requested Plan Adaptation
 
+Status: In progress
+
 Goal: allow the user to ask the agent to adjust future study work based on performance.
 
 ### Tasks
 
-- [ ] Audit `agent/adapt-plan`.
+- [x] Audit `agent/adapt-plan`.
 - [ ] Use the performance context from Module 6.
-- [ ] Only modify future incomplete activities.
-- [ ] Keep completed days immutable.
-- [ ] Explain changes to the user in plain language.
-- [ ] Support requests like:
+- [x] Only modify future incomplete activities.
+- [x] Keep completed days immutable.
+- [x] Explain changes to the user in plain language.
+- [x] Support requests like:
   - "Make tomorrow easier."
   - "Focus more on my weak topics."
   - "I only have 30 minutes tomorrow."
@@ -361,6 +363,14 @@ Goal: allow the user to ask the agent to adjust future study work based on perfo
 - [ ] User-flow/browser verification completed before checkpoint commit.
 - [ ] UI/UX review completed before checkpoint commit.
 - [ ] Module checkpoint commit created.
+
+### Module 7 Notes
+
+- `adapt-plan` now accepts a user request string and passes it into the adaptation prompt.
+- Adaptation remains limited to future days; completed/current days are preserved and the response reports the preserved day boundary.
+- The API now returns a plain-language explanation summarizing the requested change, weak-topic focus, strong-topic maintenance, and number of future days rewritten.
+- Verification so far: `pnpm typecheck` passed and `pnpm lint` passed with pre-existing warnings.
+- Full Module 7 verification still needs a plan with actual future days and review data, or a controlled smoke plan, so the route can be tested end to end without mutating the user's old one-day/stale plans.
 
 ## Module 8: Notifications
 

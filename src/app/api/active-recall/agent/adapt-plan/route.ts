@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { planId } = await req.json()
+    const { planId, request: userRequest } = await req.json()
 
     if (!planId) {
       return NextResponse.json({ error: 'Missing planId' }, { status: 400 })
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
     today.setHours(0, 0, 0, 0)
     const currentDay = Math.max(1, Math.floor((today.getTime() - planCreated.getTime()) / (1000 * 60 * 60 * 24)) + 1)
 
-    // Get remaining schedule (future days)
+    // Adapt only future days. Completed/current days are immutable in this module.
     const remainingSchedule = schedule.filter((d: { day: number }) => d.day > currentDay)
 
     if (remainingSchedule.length === 0) {
@@ -106,6 +106,7 @@ export async function POST(req: NextRequest) {
     // Build adaptation context
     const ctx: PlanAdaptationContext = {
       planTitle: plan.title,
+      userRequest,
       currentDay,
       totalDays: schedule.length,
       remainingSchedule,
@@ -175,8 +176,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       adapted: true,
+      explanation: [
+        userRequest ? `Adjusted future days for: ${userRequest}` : 'Adjusted future days based on recent performance.',
+        weakTopics.length ? `Added more focus on weak topics: ${weakTopics.slice(0, 3).join(', ')}.` : 'No severe weak topic was detected, so the plan stays balanced.',
+        strongTopics.length ? `Protected lighter maintenance for strong topics: ${strongTopics.slice(0, 3).join(', ')}.` : 'No strong topic was over-prioritized.',
+        `Kept days 1-${currentDay} unchanged and rewrote ${adaptedSchedule.length} future day${adaptedSchedule.length === 1 ? '' : 's'}.`,
+      ].join(' '),
       changes: {
         daysAdjusted: adaptedSchedule.length,
+        preservedThroughDay: currentDay,
         weakTopics,
         strongTopics,
         overallAccuracy,
