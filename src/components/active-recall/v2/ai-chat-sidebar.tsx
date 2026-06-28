@@ -29,13 +29,20 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui'
 import { MemoizedMarkdown } from '@/components/chat/memoized-markdown'
 import { useDocuments } from '@/contexts/documents-context'
+import { useAuth } from '@/contexts/auth-context'
 
 // ============================================
 // Chat History Persistence
 // ============================================
 
-const CONVERSATIONS_STORAGE_KEY = 'ar-agent-conversations'
-const ACTIVE_CONVO_KEY = 'ar-agent-active-convo'
+const CONVERSATIONS_STORAGE_PREFIX = 'ar-agent-conversations'
+const ACTIVE_CONVO_PREFIX = 'ar-agent-active-convo'
+
+const getConversationsStorageKey = (userId: string | null | undefined) =>
+  userId ? `${CONVERSATIONS_STORAGE_PREFIX}:${userId}` : null
+
+const getActiveConvoStorageKey = (userId: string | null | undefined) =>
+  userId ? `${ACTIVE_CONVO_PREFIX}:${userId}` : null
 
 interface ChatMessage {
   id: string
@@ -92,9 +99,11 @@ function parseActions(text: string): { cleanText: string; actions: AgentAction[]
 // LocalStorage helpers
 // ============================================
 
-function loadConversations(): Conversation[] {
+function loadConversations(userId: string | null | undefined): Conversation[] {
+  const storageKey = getConversationsStorageKey(userId)
+  if (!storageKey) return []
   try {
-    const stored = localStorage.getItem(CONVERSATIONS_STORAGE_KEY)
+    const stored = localStorage.getItem(storageKey)
     if (!stored) return []
     const convos: Conversation[] = JSON.parse(stored)
     // Reset stale action statuses — mark interrupted actions as done (backend likely succeeded)
@@ -114,32 +123,81 @@ function loadConversations(): Conversation[] {
   }
 }
 
-function saveConversations(convos: Conversation[]) {
+function saveConversations(userId: string | null | undefined, convos: Conversation[]) {
+  const storageKey = getConversationsStorageKey(userId)
+  if (!storageKey) return
   try {
     // Keep only the latest 50 conversations to avoid storage issues
     const trimmed = convos.slice(0, 50)
-    localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(trimmed))
+    localStorage.setItem(storageKey, JSON.stringify(trimmed))
   } catch {
     // Storage full — trim more aggressively
     try {
-      localStorage.setItem(CONVERSATIONS_STORAGE_KEY, JSON.stringify(convos.slice(0, 20)))
+      localStorage.setItem(storageKey, JSON.stringify(convos.slice(0, 20)))
     } catch { /* give up */ }
   }
 }
 
-function getActiveConvoId(): string | null {
+function getActiveConvoId(userId: string | null | undefined): string | null {
+  const storageKey = getActiveConvoStorageKey(userId)
+  if (!storageKey) return null
   try {
-    return localStorage.getItem(ACTIVE_CONVO_KEY)
+    return localStorage.getItem(storageKey)
   } catch {
     return null
   }
 }
 
-function setActiveConvoId(id: string | null) {
+function setStoredActiveConvoId(userId: string | null | undefined, id: string | null) {
+  const storageKey = getActiveConvoStorageKey(userId)
+  if (!storageKey) return
   try {
-    if (id) localStorage.setItem(ACTIVE_CONVO_KEY, id)
-    else localStorage.removeItem(ACTIVE_CONVO_KEY)
+    if (id) localStorage.setItem(storageKey, id)
+    else localStorage.removeItem(storageKey)
   } catch { /* ignore */ }
+}
+
+function hasLegacyConversations(): boolean {
+  try {
+    return Boolean(localStorage.getItem('ar-agent-conversations') || localStorage.getItem('ar-agent-chat-history'))
+  } catch {
+    return false
+  }
+}
+
+function importLegacyConversations(userId: string | null | undefined): Conversation[] {
+  if (!userId) return []
+  const imported: Conversation[] = []
+
+  try {
+    const legacy = localStorage.getItem('ar-agent-conversations')
+    if (legacy) {
+      const parsed = JSON.parse(legacy) as Conversation[]
+      if (Array.isArray(parsed)) imported.push(...parsed)
+    }
+  } catch {
+    // ignore malformed legacy data
+  }
+
+  const migrated = migrateOldChatHistory()
+  if (migrated) imported.unshift(migrated)
+
+  if (imported.length > 0) {
+    const existing = loadConversations(userId)
+    const seen = new Set<string>()
+    const merged = [...imported, ...existing].filter((convo) => {
+      if (!convo?.id || seen.has(convo.id)) return false
+      seen.add(convo.id)
+      return true
+    })
+    saveConversations(userId, merged)
+    localStorage.removeItem('ar-agent-conversations')
+    localStorage.removeItem('ar-agent-active-convo')
+    localStorage.removeItem('ar-agent-chat-history')
+    return merged
+  }
+
+  return []
 }
 
 // Migrate old single-chat format to new conversations format
@@ -291,20 +349,14 @@ interface AIChatSidebarProps {
 }
 
 export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPromptHandled }: AIChatSidebarProps) {
+  const { user } = useAuth()
+  const userId = user?.id ?? null
+
   // Conversation management
-  const [conversations, setConversations] = useState<Conversation[]>(() => {
-    const convos = loadConversations()
-    // Migrate old format if needed
-    const migrated = migrateOldChatHistory()
-    if (migrated) {
-      const updated = [migrated, ...convos]
-      saveConversations(updated)
-      return updated
-    }
-    return convos
-  })
-  const [activeConvoId, setActiveConvoIdState] = useState<string | null>(() => getActiveConvoId())
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [activeConvoId, setActiveConvoIdState] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [legacyImportAvailable, setLegacyImportAvailable] = useState(false)
 
   const activeConvo = conversations.find((c) => c.id === activeConvoId) || null
   const messages = useMemo(() => activeConvo?.messages || [], [activeConvo])
@@ -327,9 +379,9 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
 
   const switchConvo = useCallback((id: string | null) => {
     setActiveConvoIdState(id)
-    setActiveConvoId(id)
+    setStoredActiveConvoId(userId, id)
     setShowHistory(false)
-  }, [])
+  }, [userId])
 
   const startNewConvo = useCallback(() => {
     const newConvo: Conversation = {
@@ -349,6 +401,17 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
       switchConvo(null)
     }
   }, [activeConvoId, switchConvo])
+
+  const importPreviousHistory = useCallback(() => {
+    const imported = importLegacyConversations(userId)
+    if (imported.length === 0) {
+      setLegacyImportAvailable(false)
+      return
+    }
+    setConversations(imported)
+    switchConvo(imported[0].id)
+    setLegacyImportAvailable(false)
+  }, [userId, switchConvo])
 
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -370,6 +433,26 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
   }, [])
 
   useEffect(() => {
+    if (!userId) {
+      setConversations([])
+      setActiveConvoIdState(null)
+      setShowHistory(false)
+      setInput('')
+      setIsStreaming(false)
+      return
+    }
+
+    const convos = loadConversations(userId)
+    setConversations(convos)
+    setLegacyImportAvailable(hasLegacyConversations())
+    const storedActiveId = getActiveConvoId(userId)
+    setActiveConvoIdState(storedActiveId && convos.some((c) => c.id === storedActiveId)
+      ? storedActiveId
+      : null)
+    setShowHistory(false)
+  }, [userId])
+
+  useEffect(() => {
     scrollToBottom()
   }, [messages, scrollToBottom])
 
@@ -389,13 +472,13 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
 
   // Persist conversations
   useEffect(() => {
-    saveConversations(conversations)
-  }, [conversations])
+    saveConversations(userId, conversations)
+  }, [userId, conversations])
 
   // Persist active convo id
   useEffect(() => {
-    setActiveConvoId(activeConvoId)
-  }, [activeConvoId])
+    setStoredActiveConvoId(userId, activeConvoId)
+  }, [userId, activeConvoId])
 
   // ============================================
   // Action Dispatcher
@@ -765,7 +848,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
       }
       setConversations((prev) => [newConvo, ...prev])
       setActiveConvoIdState(newConvo.id)
-      setActiveConvoId(newConvo.id)
+      setStoredActiveConvoId(userId, newConvo.id)
       currentConvoId = newConvo.id
     }
 
@@ -870,6 +953,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
         body: JSON.stringify({
           messages: apiMessages,
           agentMode: true,
+          selectedDocumentIds: selectedDocuments.map((doc) => doc.id),
         }),
         signal: abortControllerRef.current.signal,
       })
@@ -1182,6 +1266,8 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
                   activeConvoId={activeConvoId}
                   onSelect={switchConvo}
                   onDelete={deleteConvo}
+                  legacyImportAvailable={legacyImportAvailable}
+                  onImportLegacy={importPreviousHistory}
                 />
               ) : (
                 <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -1330,11 +1416,15 @@ function ConversationHistory({
   activeConvoId,
   onSelect,
   onDelete,
+  legacyImportAvailable,
+  onImportLegacy,
 }: {
   conversations: Conversation[]
   activeConvoId: string | null
   onSelect: (id: string) => void
   onDelete: (id: string) => void
+  legacyImportAvailable: boolean
+  onImportLegacy: () => void
 }) {
   if (conversations.length === 0) {
     return (
@@ -1342,6 +1432,16 @@ function ConversationHistory({
         <MessageSquare className="h-10 w-10 text-muted-foreground/30 mb-3" />
         <p className="text-sm text-muted-foreground">No conversations yet</p>
         <p className="text-xs text-muted-foreground/60 mt-1">Start chatting with the Study Agent</p>
+        {legacyImportAvailable && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-4"
+            onClick={onImportLegacy}
+          >
+            Import previous local history
+          </Button>
+        )}
       </div>
     )
   }
@@ -1367,6 +1467,13 @@ function ConversationHistory({
 
   return (
     <div className="flex-1 overflow-y-auto">
+      {legacyImportAvailable && (
+        <div className="p-3 border-b border-border/50">
+          <Button size="sm" variant="outline" className="w-full" onClick={onImportLegacy}>
+            Import previous local history
+          </Button>
+        </div>
+      )}
       {groups.map((group) => (
         <div key={group.label}>
           <div className="px-4 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider sticky top-0 bg-background/95 backdrop-blur-sm">

@@ -85,6 +85,7 @@ const toSelectedDocument = (doc: DocumentItem): SelectedDocument => ({
 
 interface DocumentsApiResponse {
   documents?: DocumentItem[]
+  userId?: string
 }
 
 export function DocumentsProvider({ children }: { children: React.ReactNode }) {
@@ -93,14 +94,20 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
   const selectedDocsStorageKeyRef = useRef<string | null>(null)
   const hasLoadedStoredSelectionRef = useRef(false)
 
-  const readCache = () => {
+  const readCache = (userId?: string | null) => {
     if (typeof window === 'undefined') return []
+    if (!userId) return []
     try {
       const cached = window.sessionStorage.getItem(DOCUMENTS_CACHE_KEY)
       if (!cached) return []
-      const parsed = JSON.parse(cached) as { timestamp: number; documents: DocumentItem[] }
+      const parsed = JSON.parse(cached) as { timestamp: number; userId?: string; documents: DocumentItem[] }
       if (!parsed?.documents || !Array.isArray(parsed.documents)) return []
+      if (parsed.userId !== userId) {
+        window.sessionStorage.removeItem(DOCUMENTS_CACHE_KEY)
+        return []
+      }
       if (Date.now() - (parsed.timestamp || 0) > DOCUMENTS_CACHE_TTL) {
+        window.sessionStorage.removeItem(DOCUMENTS_CACHE_KEY)
         return []
       }
       cacheRef.current = parsed.documents
@@ -110,12 +117,13 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const persistCache = (docs: DocumentItem[]) => {
+  const persistCache = (docs: DocumentItem[], userId?: string | null) => {
     if (typeof window === 'undefined') return
+    if (!userId) return
     try {
       window.sessionStorage.setItem(
         DOCUMENTS_CACHE_KEY,
-        JSON.stringify({ timestamp: Date.now(), documents: docs })
+        JSON.stringify({ timestamp: Date.now(), userId, documents: docs })
       )
     } catch {
       // ignore storage errors
@@ -157,8 +165,8 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const [documents, setDocuments] = useState<DocumentItem[]>(() => readCache())
-  const [documentsLoading, setDocumentsLoading] = useState(() => cacheRef.current.length === 0)
+  const [documents, setDocuments] = useState<DocumentItem[]>([])
+  const [documentsLoading, setDocumentsLoading] = useState(false)
   const [uploadingDocuments, setUploadingDocuments] = useState<UploadingDocument[]>(() => readUploadingCache())
   const [selectedDocuments, setSelectedDocuments] = useState<SelectedDocument[]>([])
 
@@ -166,10 +174,10 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
     setDocuments(prev => {
       const next = updater(prev)
       cacheRef.current = next
-      persistCache(next)
+      persistCache(next, user?.id)
       return next
     })
-  }, [])
+  }, [user?.id])
 
   const upsertDocument = useCallback((document: DocumentItem) => {
     applyDocumentsUpdate(prev => {
@@ -202,6 +210,10 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
   const refreshDocuments = useCallback(async (options?: { force?: boolean }) => {
     if (!user) {
       applyDocumentsUpdate(() => [])
+      cacheRef.current = []
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem(DOCUMENTS_CACHE_KEY)
+      }
       setDocumentsLoading(false)
       return
     }
@@ -223,6 +235,12 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
       }
 
       const payload = await response.json() as DocumentsApiResponse
+      if (payload.userId && payload.userId !== user.id) {
+        console.warn('[Documents] Ignoring document payload for different user')
+        applyDocumentsUpdate(() => [])
+        setSelectedDocuments([])
+        return
+      }
       const nextDocs = Array.isArray(payload?.documents) ? payload.documents : []
       applyDocumentsUpdate(() => nextDocs)
 
@@ -247,6 +265,10 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
       selectedDocsStorageKeyRef.current = null
       hasLoadedStoredSelectionRef.current = false
       applyDocumentsUpdate(() => [])
+      cacheRef.current = []
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.removeItem(DOCUMENTS_CACHE_KEY)
+      }
       setSelectedDocuments([])
       setUploadingDocuments([])
       persistUploadingCache([]) // Clear uploading documents cache
@@ -257,6 +279,10 @@ export function DocumentsProvider({ children }: { children: React.ReactNode }) {
     const storageKey = getSelectedDocumentsStorageKey(user.id)
     selectedDocsStorageKeyRef.current = storageKey
     hasLoadedStoredSelectionRef.current = false
+    const cachedDocs = readCache(user.id)
+    cacheRef.current = cachedDocs
+    setDocuments(cachedDocs)
+    setDocumentsLoading(cachedDocs.length === 0)
 
     const storedSelection = typeof window !== 'undefined'
       ? parseStoredSelectedDocuments(window.localStorage.getItem(storageKey))

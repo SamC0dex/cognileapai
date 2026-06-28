@@ -6,6 +6,7 @@ import { GEMINI_MODELS, GeminiModelSelector, type GeminiModelKey } from '@/lib/a
 import { TokenManager } from '@/lib/token-manager'
 import { resolveAIConfig } from '@/lib/ai-router'
 import { generateCompletionStream, type UserAIConfig } from '@/lib/ai-providers'
+import { generateKieDirectPdfCompletion } from '@/lib/kie-direct-pdf'
 import { recordUsage } from '@/lib/usage-tracker'
 
 // Service role client for background operations only
@@ -13,6 +14,8 @@ const serviceSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
+
+const DIRECT_PDF_TEXT_THRESHOLD = 5000
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30
@@ -152,6 +155,7 @@ export async function POST(req: NextRequest) {
     // Track token counts
     const systemPromptTokens = Math.ceil(systemPrompt.length / 4)
     let documentContextTokens = 0
+    const directPdfUrls: string[] = []
 
     // Add document context if any
     if (documentId || selectedDocuments?.length) {
@@ -165,26 +169,61 @@ export async function POST(req: NextRequest) {
         try {
           const { data: documents } = await supabase
             .from('documents')
-            .select('id, title, document_content, actual_tokens, token_count_method')
+            .select('id, title, document_content, actual_tokens, token_count_method, storage_path, file_type')
             .in('id', documentsToProcess.map(d => d.id))
             .eq('user_id', user.id)
 
           if (documents && documents.length > 0) {
             console.log(`[StatefulChat] Found ${documents.length} documents`)
+            const foundIds = new Set(documents.map(doc => doc.id))
+            const missingDocs = documentsToProcess.filter(doc => !foundIds.has(doc.id))
+            if (missingDocs.length > 0) {
+              return new Response(
+                JSON.stringify({
+                  error: 'Selected document is not available for this account',
+                  message: 'The selected file is stale or belongs to another account. Please refresh, reselect the document, or upload it in the current account.',
+                }),
+                { status: 403, headers: { 'Content-Type': 'application/json' } }
+              )
+            }
 
-            const processedDocs = documents
-              .filter(doc => doc.document_content?.trim())
-              .map(doc => ({
+            const processedDocs = []
+            for (const doc of documents) {
+              const extractedContent = doc.document_content?.trim() || ''
+              const isPdf = doc.file_type === 'pdf' || doc.storage_path?.toLowerCase().endsWith('.pdf')
+
+              if (isPdf && extractedContent.length < DIRECT_PDF_TEXT_THRESHOLD && doc.storage_path) {
+                const { data: signedUrlData, error: signedUrlError } = await serviceSupabase.storage
+                  .from('documents')
+                  .createSignedUrl(doc.storage_path, 15 * 60)
+
+                if (!signedUrlError && signedUrlData?.signedUrl) {
+                  directPdfUrls.push(signedUrlData.signedUrl)
+                  processedDocs.push({
+                    id: doc.id,
+                    title: doc.title,
+                    content: `[Direct PDF attached: ${doc.title}]`,
+                    actualTokens: 0,
+                    tokenMethod: 'direct_pdf',
+                  })
+                }
+                continue
+              }
+
+              if (!extractedContent) continue
+
+              processedDocs.push({
                 id: doc.id,
                 title: doc.title,
-                content: doc.document_content!,
+                content: extractedContent,
                 actualTokens: doc.actual_tokens,
                 tokenMethod: doc.token_count_method
-              }))
+              })
+            }
 
             if (processedDocs.length > 0) {
               // Check documents have token counts (accept both api_count and estimation)
-              const docsWithoutTokens = processedDocs.filter(doc => !doc.actualTokens)
+              const docsWithoutTokens = processedDocs.filter(doc => doc.tokenMethod !== 'direct_pdf' && !doc.actualTokens)
 
               if (docsWithoutTokens.length > 0) {
                 const missingDocs = docsWithoutTokens.map(d => d.title).join(', ')
@@ -220,6 +259,14 @@ export async function POST(req: NextRequest) {
                 console.log(`[StatefulChat] Built document context: ${docContext.length} chars`)
               }
             }
+          } else if (documentsToProcess.length > 0) {
+            return new Response(
+              JSON.stringify({
+                error: 'Selected document is not available for this account',
+                message: 'The selected file is stale or belongs to another account. Please refresh, reselect the document, or upload it in the current account.',
+              }),
+              { status: 403, headers: { 'Content-Type': 'application/json' } }
+            )
           }
         } catch (error) {
           console.error('[StatefulChat] Error fetching document context:', error)
@@ -253,22 +300,36 @@ export async function POST(req: NextRequest) {
           let fullResponse = ''
           let apiUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | null = null
 
-          for await (const chunk of generateCompletionStream(configForStream, {
-            messages: apiMessages,
-            temperature: 0.5,  // Lower temperature for faster, more focused responses
-            reasoningEffort: reasoningEffort || undefined,
-          })) {
-            if (chunk.text) {
-              fullResponse += chunk.text
-              const data = JSON.stringify(chunk.text)
-              controller.enqueue(new TextEncoder().encode(`0:${data}\n`))
-            }
+          if (directPdfUrls.length > 0) {
+            const directResult = await generateKieDirectPdfCompletion({
+              apiKey: process.env.KIE_API_KEY || '',
+              model: actualModelId,
+              messages: apiMessages,
+              pdfUrls: directPdfUrls,
+              maxTokens: 4096,
+              temperature: 0.5,
+            })
+            fullResponse = directResult.text
+            apiUsage = directResult.usage
+            controller.enqueue(new TextEncoder().encode(`0:${JSON.stringify(fullResponse)}\n`))
+          } else {
+            for await (const chunk of generateCompletionStream(configForStream, {
+              messages: apiMessages,
+              temperature: 0.5,  // Lower temperature for faster, more focused responses
+              reasoningEffort: reasoningEffort || undefined,
+            })) {
+              if (chunk.text) {
+                fullResponse += chunk.text
+                const data = JSON.stringify(chunk.text)
+                controller.enqueue(new TextEncoder().encode(`0:${data}\n`))
+              }
 
-            if (chunk.isComplete) {
-              // Use real token counts from the API if available, fall back to estimation
-              if (chunk.usage) {
+              if (chunk.isComplete && chunk.usage) {
+                // Use real token counts from the API if available, fall back to estimation
                 apiUsage = chunk.usage
               }
+            }
+          }
 
               const userMessageTokens = apiUsage?.promptTokens ?? Math.ceil(lastMessage.content.length / 4)
               const assistantMessageTokens = apiUsage?.completionTokens ?? Math.ceil(fullResponse.length / 4)
@@ -355,8 +416,6 @@ export async function POST(req: NextRequest) {
                 source: 'chat',
                 sourceId: conversationId,
               })
-            }
-          }
 
           controller.close()
         } catch (error) {

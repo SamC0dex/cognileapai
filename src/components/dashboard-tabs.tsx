@@ -286,6 +286,7 @@ export function DashboardTabs({
     openCanvas,
     expandPanel,
     clearGeneratedContent,
+    lastLoadedUserId,
     setLastLoadedUserId,
     _hasHydrated: studyToolsHydrated
   } = useStudyToolsStore()
@@ -343,6 +344,18 @@ export function DashboardTabs({
     }
 
     const hasCachedData = generatedContent.length > 0 || flashcardSets.length > 0 || quizSets.length > 0 || mindMapSets.length > 0
+    const cacheBelongsToDifferentUser = lastLoadedUserId && lastLoadedUserId !== user.id
+    const cacheHasUnknownOwner = hasCachedData && !lastLoadedUserId
+
+    if (cacheBelongsToDifferentUser || cacheHasUnknownOwner) {
+      clearGeneratedContent()
+      clearFlashcardSets()
+      clearQuizSets()
+      clearMindMapSets()
+      setLastLoadedUserId(null)
+      setIsInitialLoad(true)
+      return
+    }
 
     if (hasCachedData) {
       setIsInitialLoad(false)

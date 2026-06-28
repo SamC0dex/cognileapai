@@ -22,6 +22,12 @@ export interface SM2Output {
   nextReviewAt: Date
 }
 
+function roundInterval(days: number) {
+  return days < 1
+    ? Math.round(days * 100000) / 100000
+    : Math.round(days * 100) / 100
+}
+
 /**
  * SM-2 Algorithm — compute next review schedule based on rating.
  *
@@ -63,16 +69,16 @@ export function sm2(input: SM2Input): SM2Output {
   }
 
   // Apply AI multiplier to interval
-  newInterval = Math.round(newInterval * aiMultiplier * 100) / 100
+  newInterval = roundInterval(newInterval * aiMultiplier)
 
   // Apply response time adjustment (capped at ±10%)
   if (avgResponseTimeMs !== undefined && quality >= 3) {
     if (avgResponseTimeMs > 12000) {
       // Slow response indicates uncertainty — review sooner
-      newInterval = Math.round(newInterval * 0.9 * 100) / 100
+      newInterval = roundInterval(newInterval * 0.9)
     } else if (avgResponseTimeMs < 3000) {
       // Fast confident response — can space out
-      newInterval = Math.round(newInterval * 1.05 * 100) / 100
+      newInterval = roundInterval(newInterval * 1.05)
     }
   }
 

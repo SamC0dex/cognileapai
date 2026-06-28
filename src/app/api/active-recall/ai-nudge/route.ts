@@ -80,6 +80,12 @@ export async function GET(req: NextRequest) {
 
     const mastered = allCards.filter((c) => c.recall_layer === RecallLayer.MASTERED).length
 
+    if (allCards.length === 0) {
+      return NextResponse.json({
+        message: 'Start by selecting a document and asking the Study Agent to build your first active recall plan.',
+      })
+    }
+
     // Build nudge prompt
     const messages = buildNudgePrompt({
       dueCount: dueCards.length,

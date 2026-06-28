@@ -108,6 +108,8 @@ const MODEL_HIERARCHY: ModelConfig[] = [
   }
 ]
 
+const DIRECT_PDF_TEXT_THRESHOLD = 5000
+
 function getOptimalOutputTokens(toolType: string, modelName: string): number {
   // Use tool-specific allocation, but cap at model maximum
   const toolAllocation = TOOL_TOKEN_ALLOCATIONS[toolType] || 16384
@@ -349,6 +351,80 @@ async function generateWithFallback(
 
   // This should never be reached due to the throw in the last iteration
   throw new Error('All fallback models failed')
+}
+
+async function generateWithDirectPdfFallback(
+  systemPrompt: string,
+  userPrompt: string,
+  type: string,
+  pdfUrl: string
+): Promise<FallbackResult> {
+  const apiKey = process.env.KIE_API_KEY
+  if (!apiKey) {
+    throw new Error('Direct PDF generation requires KIE_API_KEY.')
+  }
+
+  const promptText = `${systemPrompt}\n\n${userPrompt}\n\nThe source document is attached as a PDF URL. Read the PDF directly and generate the requested study tool from its visual/document content.`
+
+  for (const modelConfig of MODEL_HIERARCHY) {
+    const modelStartTime = Date.now()
+    const optimalOutputTokens = getOptimalOutputTokens(type, modelConfig.name)
+
+    try {
+      console.log(`[DirectPDF] Attempting generation with ${modelConfig.name}`)
+
+      const response = await fetch(`https://api.kie.ai/${modelConfig.name}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: modelConfig.name,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              { type: 'image_url', image_url: { url: pdfUrl } },
+            ],
+          }],
+          max_tokens: optimalOutputTokens,
+          temperature: modelConfig.temperature,
+        }),
+      })
+
+      const responseText = await response.text()
+      if (!response.ok) {
+        throw new Error(`${response.status} ${responseText || response.statusText}`)
+      }
+
+      const data = JSON.parse(responseText) as {
+        choices?: Array<{ message?: { content?: string } }>
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+      }
+
+      const resultText = data.choices?.[0]?.message?.content || ''
+      if (resultText.length < 50) {
+        throw new Error(`Generated content too short (${resultText.length} chars)`)
+      }
+
+      console.log(`[DirectPDF] Success with ${modelConfig.name} (${resultText.length} chars)`)
+      return {
+        resultText,
+        modelUsed: `${modelConfig.name} direct-pdf`,
+        duration: Date.now() - modelStartTime,
+        usage: data.usage ? {
+          promptTokens: data.usage.prompt_tokens ?? 0,
+          completionTokens: data.usage.completion_tokens ?? 0,
+          totalTokens: data.usage.total_tokens ?? 0,
+        } : null,
+      }
+    } catch (error) {
+      console.warn(`[DirectPDF] ${modelConfig.name} failed:`, error)
+    }
+  }
+
+  throw new Error('Direct PDF generation failed for all Kie models.')
 }
 
 
@@ -612,6 +688,7 @@ export async function POST(req: NextRequest) {
 
     let documentContent = ''
     let documentTitle = 'Untitled Document'
+    let directPdfUrl: string | null = null
 
     // Get content based on documentId or conversationId
     if (documentId) {
@@ -620,7 +697,7 @@ export async function POST(req: NextRequest) {
       // Fetch document and its content (filtered by user_id through RLS)
       const { data: document, error: docError } = await supabase
         .from('documents')
-        .select('id, title, processing_status, document_content')
+        .select('id, title, processing_status, document_content, storage_path, file_type')
         .eq('id', documentId)
         .eq('user_id', user.id) // Explicit user filter for security
         .single()
@@ -644,17 +721,35 @@ export async function POST(req: NextRequest) {
 
       documentTitle = document.title
 
-      // Check if document has content
-      if (!document.document_content) {
+      const extractedContent = document.document_content?.trim() || ''
+      const isPdf = document.file_type === 'pdf' || document.storage_path?.toLowerCase().endsWith('.pdf')
+
+      if (isPdf && extractedContent.length < DIRECT_PDF_TEXT_THRESHOLD && document.storage_path) {
+        const { data: signedUrlData, error: signedUrlError } = await serviceSupabase.storage
+          .from('documents')
+          .createSignedUrl(document.storage_path, 15 * 60)
+
+        if (signedUrlError || !signedUrlData?.signedUrl) {
+          console.error('[StudyTools] Failed to create direct PDF signed URL:', signedUrlError)
+          return NextResponse.json(
+            { error: 'Document has no extractable text and could not be prepared for direct PDF reading.' },
+            { status: 422 }
+          )
+        }
+
+        directPdfUrl = signedUrlData.signedUrl
+        documentContent = 'This PDF has little or no extractable text. Use the attached PDF file directly as the source content.'
+        console.log('[StudyTools] Using direct PDF fallback for weak extracted content:', documentId)
+      } else if (!extractedContent) {
         console.warn('[StudyTools] Document has no content:', documentId)
         return NextResponse.json(
           { error: 'Document has no content available for study tool generation' },
           { status: 422 }
         )
+      } else {
+        documentContent = extractedContent
       }
 
-      // Use document content directly
-      documentContent = document.document_content
       console.log('[StudyTools] Using document content length:', documentContent.length)
 
     } else if (conversationId) {
@@ -715,7 +810,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate content length
-    if (documentContent.length < 100) {
+    if (!directPdfUrl && documentContent.length < 100) {
       return NextResponse.json(
         { error: 'Insufficient content for generating meaningful study materials' },
         { status: 422 }
@@ -834,7 +929,26 @@ For each topic, read the source material and build a mind map that covers all th
     let usageProvider = 'kie'
     let usageModel = 'gemini-3-flash'
 
-    if (userAIConfig) {
+    if (directPdfUrl) {
+      const fallbackResult = await generateWithDirectPdfFallback(systemPrompt, userPrompt, type, directPdfUrl)
+      resultText = fallbackResult.resultText
+      modelUsed = fallbackResult.modelUsed
+      generationDuration = fallbackResult.duration
+      usageModel = fallbackResult.modelUsed.split(' ')[0]
+
+      const inputTokens = fallbackResult.usage?.promptTokens ?? Math.ceil((systemPrompt.length + userPrompt.length) / 4)
+      const outputTokens = fallbackResult.usage?.completionTokens ?? Math.ceil(resultText.length / 4)
+      recordUsage({
+        userId: user.id,
+        provider: usageProvider,
+        model: usageModel,
+        inputTokens,
+        outputTokens,
+        totalTokens: fallbackResult.usage?.totalTokens ?? (inputTokens + outputTokens),
+        source: 'study-tool',
+        sourceId: generationId,
+      })
+    } else if (userAIConfig) {
       // Use user's configured provider
       const completionResult = await generateCompletion(userAIConfig, {
         messages: [

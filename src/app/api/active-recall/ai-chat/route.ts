@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { routedCompletionStream, type ResolvedAIConfig } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
+import { supabase as serviceSupabase } from '@/lib/supabase'
+import { generateKieDirectPdfCompletion } from '@/lib/kie-direct-pdf'
 import { buildAgentSystemPrompt, buildAIChatSystemPrompt, type AgentContext, type AIChatContext, type PlanPerformance } from '@/lib/active-recall-prompts'
 import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
 import { buildActiveRecallReadiness } from '@/lib/active-recall-readiness'
 import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
 import { RecallLayer } from '@/types/active-recall'
 import type { ChatMessage, TokenUsage } from '@/lib/ai-providers'
+
+const DIRECT_PDF_TEXT_THRESHOLD = 5000
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,9 +22,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { messages: clientMessages, agentMode } = await req.json() as {
+    const { messages: clientMessages, agentMode, selectedDocumentIds } = await req.json() as {
       messages: { role: 'user' | 'assistant'; content: string }[]
       agentMode?: boolean
+      selectedDocumentIds?: string[]
     }
 
     if (!clientMessages?.length) {
@@ -229,6 +234,58 @@ export async function POST(req: NextRequest) {
       systemPrompt = buildAIChatSystemPrompt(ctx)
     }
 
+    const directPdfUrls: string[] = []
+    const selectedIds = Array.isArray(selectedDocumentIds) ? selectedDocumentIds.filter(Boolean).slice(0, 3) : []
+    if (selectedIds.length > 0) {
+      const { data: selectedDocs, error: selectedDocsError } = await supabase
+        .from('documents')
+        .select('id, title, document_content, storage_path, file_type')
+        .in('id', selectedIds)
+        .eq('user_id', user.id)
+
+      if (selectedDocsError) {
+        console.error('[AIChat] Selected document context error:', selectedDocsError)
+      }
+
+      const foundSelectedIds = new Set((selectedDocs || []).map((doc) => doc.id))
+      const missingSelectedIds = selectedIds.filter((id) => !foundSelectedIds.has(id))
+      if (missingSelectedIds.length > 0) {
+        return NextResponse.json(
+          {
+            error: 'Selected document is not available for this account',
+            message: 'The selected file is stale or belongs to another account. Please refresh, reselect the document, or upload it in the current account.',
+          },
+          { status: 403 }
+        )
+      }
+
+      const textContexts: string[] = []
+      for (const doc of selectedDocs || []) {
+        const extractedContent = doc.document_content?.trim() || ''
+        const isPdf = doc.file_type === 'pdf' || doc.storage_path?.toLowerCase().endsWith('.pdf')
+
+        if (isPdf && extractedContent.length < DIRECT_PDF_TEXT_THRESHOLD && doc.storage_path) {
+          const { data: signedUrlData, error: signedUrlError } = await serviceSupabase.storage
+            .from('documents')
+            .createSignedUrl(doc.storage_path, 15 * 60)
+
+          if (!signedUrlError && signedUrlData?.signedUrl) {
+            directPdfUrls.push(signedUrlData.signedUrl)
+            textContexts.push(`=== ${doc.title} ===\n[Direct PDF attached because extracted text is unavailable.]`)
+          }
+          continue
+        }
+
+        if (extractedContent) {
+          textContexts.push(`=== ${doc.title} ===\n${extractedContent.slice(0, 12000)}`)
+        }
+      }
+
+      if (textContexts.length > 0) {
+        systemPrompt += `\n\nSelected document context:\n${textContexts.join('\n\n')}`
+      }
+    }
+
     const aiMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...clientMessages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -239,22 +296,42 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const generator = routedCompletionStream(user.id, {
-            messages: aiMessages,
-            maxTokens: 2000,
-            temperature: 0.7,
-          })
-
           let finalUsage: TokenUsage | null = null
           let finalConfig: ResolvedAIConfig | undefined
 
-          for await (const chunk of generator) {
-            if (chunk.text) {
-              const data = JSON.stringify(chunk.text)
-              controller.enqueue(encoder.encode(`0:${data}\n`))
+          if (directPdfUrls.length > 0) {
+            const directResult = await generateKieDirectPdfCompletion({
+              apiKey: process.env.KIE_API_KEY || '',
+              model: process.env.KIE_DEFAULT_MODEL || 'gemini-3-flash',
+              messages: aiMessages,
+              pdfUrls: directPdfUrls,
+              maxTokens: 3000,
+              temperature: 0.7,
+            })
+
+            finalUsage = directResult.usage
+            finalConfig = {
+              source: 'server',
+              provider: 'kie',
+              model: directResult.model,
+              userConfig: null,
             }
-            if (chunk.usage) finalUsage = chunk.usage
-            if (chunk.config) finalConfig = chunk.config
+            controller.enqueue(encoder.encode(`0:${JSON.stringify(directResult.text)}\n`))
+          } else {
+            const generator = routedCompletionStream(user.id, {
+              messages: aiMessages,
+              maxTokens: 2000,
+              temperature: 0.7,
+            })
+
+            for await (const chunk of generator) {
+              if (chunk.text) {
+                const data = JSON.stringify(chunk.text)
+                controller.enqueue(encoder.encode(`0:${data}\n`))
+              }
+              if (chunk.usage) finalUsage = chunk.usage
+              if (chunk.config) finalConfig = chunk.config
+            }
           }
 
           // Record usage after stream completes

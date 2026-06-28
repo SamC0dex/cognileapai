@@ -36,11 +36,31 @@ export async function clearAllClientStorage() {
     const keys = [
       'study-tools-storage',
       'flashcard-storage',
+      'cognileap-quiz-store',
+      'mindmap-storage',
       'cognileap:threads',
-      'chat-storage'
+      'chat-storage',
+      'cognileap-documents-cache-v1',
+      'cognileap-uploading-documents-v1',
+      'ar-agent-conversations',
+      'ar-agent-active-convo',
+      'ar-agent-chat-history'
     ]
     for (const key of keys) {
       try { localStorage.removeItem(key) } catch {}
+      try { sessionStorage.removeItem(key) } catch {}
+    }
+
+    const removablePrefixes = [
+      'cognileap-selected-documents-v1',
+      'ar-agent-conversations:',
+      'ar-agent-active-convo:'
+    ]
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (key && removablePrefixes.some((prefix) => key.startsWith(prefix))) {
+        try { localStorage.removeItem(key) } catch {}
+      }
     }
   } catch (e) {
     console.warn('[AuthUtils] localStorage key removals failed:', e)

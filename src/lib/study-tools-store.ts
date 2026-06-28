@@ -1919,6 +1919,44 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
       const result = await response.json()
       console.log('[StudyToolsStore] Loaded study tools from database:', result)
 
+      const loadedUserId = typeof result.userId === 'string' ? result.userId : null
+      const previousUserId = get().lastLoadedUserId
+      if (loadedUserId && previousUserId !== loadedUserId) {
+        try {
+          const { useFlashcardStore } = await import('@/lib/flashcard-store')
+          useFlashcardStore.getState().clearFlashcardSets()
+        } catch (error) {
+          console.warn('[StudyToolsStore] Failed to clear flashcard cache for user switch:', error)
+        }
+
+        try {
+          const { useQuizStore } = await import('@/lib/quiz-store')
+          useQuizStore.getState().clearQuizSets()
+        } catch (error) {
+          console.warn('[StudyToolsStore] Failed to clear quiz cache for user switch:', error)
+        }
+
+        try {
+          const { useMindMapStore } = await import('@/lib/mindmap-store')
+          useMindMapStore.getState().clearMindMapSets()
+        } catch (error) {
+          console.warn('[StudyToolsStore] Failed to clear mind map cache for user switch:', error)
+        }
+
+        set({
+          generatedContent: [],
+          lastLoadedUserId: loadedUserId,
+        })
+      }
+
+      if (loadedUserId && (!result.studyTools || result.studyTools.length === 0)) {
+        set({
+          generatedContent: [],
+          lastLoadedUserId: loadedUserId,
+        })
+        return
+      }
+
       if (result.success && result.studyTools && result.studyTools.length > 0) {
         // Separate flashcards, quizzes, mind-maps from regular study tools
         const flashcards: StudyToolContent[] = []
@@ -2191,12 +2229,19 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
 
         // Ensure flashcards and quizzes are not in generatedContent (they have their own stores)
         set(state => ({
-          generatedContent: state.generatedContent.filter(content => content.type !== 'flashcards' && content.type !== 'quiz')
+          generatedContent: state.generatedContent.filter(content => content.type !== 'flashcards' && content.type !== 'quiz'),
+          ...(loadedUserId ? { lastLoadedUserId: loadedUserId } : {}),
         }))
 
         console.log('[StudyToolsStore] Processed', flashcards.length, 'flashcards,', quizzes.length, 'quizzes, and', regularStudyTools.length, 'regular study tools')
       } else {
         console.log('[StudyToolsStore] No study tools found in database')
+        if (loadedUserId) {
+          set({
+            generatedContent: [],
+            lastLoadedUserId: loadedUserId,
+          })
+        }
       }
 
     } catch (error) {

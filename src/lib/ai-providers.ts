@@ -160,6 +160,12 @@ async function generateKieCompletion(
   }
 
   const choices = data.choices as Array<{ message?: { content?: string } }> | undefined
+  if (!choices || choices.length === 0) {
+    const code = data.code != null ? `code ${String(data.code)}` : 'no choices'
+    const message = typeof data.msg === 'string' ? data.msg : 'AI provider returned an empty response'
+    throw new Error(`Kie.ai: ${message} (${code})`)
+  }
+
   const usage = data.usage ? {
     promptTokens: (data.usage as Record<string, number>).prompt_tokens ?? 0,
     completionTokens: (data.usage as Record<string, number>).completion_tokens ?? 0,
@@ -167,7 +173,7 @@ async function generateKieCompletion(
   } : null
 
   return {
-    text: choices?.[0]?.message?.content || '',
+    text: choices[0]?.message?.content || '',
     usage,
   }
 }

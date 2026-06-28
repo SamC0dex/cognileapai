@@ -563,6 +563,7 @@ export function useChatStore(): StoreShape {
         // Read from stream with timeout protection
         const streamStartTime = Date.now()
         const MAX_STREAM_TIME = 90000 // 90 seconds max
+        let lineBuffer = ''
 
         while (true) {
           // Check for timeout
@@ -574,13 +575,31 @@ export function useChatStore(): StoreShape {
           const { value, done } = await reader.read()
           if (done) {
             isStreamingActive = false
+            if (lineBuffer.trim()) {
+              const line = lineBuffer.trim()
+              try {
+                if (line.startsWith('0:')) {
+                  const content = JSON.parse(line.slice(2))
+                  if (typeof content === 'string') {
+                    serverBuffer += content
+                  }
+                } else if (line.startsWith('8:')) {
+                  serverMetadata = JSON.parse(line.slice(2)) as Record<string, unknown>
+                }
+              } catch (err) {
+                console.error('[Chat] Final stream line parsing failed:', err)
+              }
+            }
             break
           }
 
           const chunk = decoder.decode(value, { stream: true })
-          const lines = chunk.split('\n').filter(line => line.trim())
+          lineBuffer += chunk
+          const lines = lineBuffer.split('\n')
+          lineBuffer = lines.pop() || ''
 
           for (const line of lines) {
+            if (!line.trim()) continue
             try {
               if (line.startsWith('0:')) {
                 const content = JSON.parse(line.slice(2))
