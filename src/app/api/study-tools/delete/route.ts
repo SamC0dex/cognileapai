@@ -105,6 +105,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const { error: reviewDeleteError } = await serviceSupabase
+      .from('review_cards')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('source_set_id', id)
+
+    if (reviewDeleteError) {
+      console.warn('[StudyTools] Deleted output but failed to delete linked review cards:', reviewDeleteError)
+    }
+
     console.log(`[StudyTools] Successfully deleted study tool: ${id}`)
 
     return NextResponse.json({

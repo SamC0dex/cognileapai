@@ -15,6 +15,8 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url)
     const documentId = searchParams.get('document_id')
+    const planId = searchParams.get('plan_id')
+    const includeUnplanned = searchParams.get('include_unplanned') === 'true'
 
     // Fetch all user's review cards
     let cardsQuery = supabase
@@ -24,6 +26,11 @@ export async function GET(req: NextRequest) {
 
     if (documentId) {
       cardsQuery = cardsQuery.eq('document_id', documentId)
+    }
+    if (planId) {
+      cardsQuery = cardsQuery.eq('plan_id', planId)
+    } else if (!includeUnplanned) {
+      cardsQuery = cardsQuery.not('plan_id', 'is', null)
     }
 
     const { data: cards, error: cardsError } = await cardsQuery

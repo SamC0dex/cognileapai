@@ -17,6 +17,9 @@ export async function POST(req: NextRequest) {
     if (!sourceType || !sourceSetId || !cards?.length) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
+    if (!planId) {
+      return NextResponse.json({ error: 'Active Recall sync requires a study plan' }, { status: 400 })
+    }
 
     console.log(`[ActiveRecall] Syncing ${cards.length} ${sourceType} cards for user ${user.id}`)
 

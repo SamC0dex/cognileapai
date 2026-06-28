@@ -232,13 +232,8 @@ export const useFlashcardStore = create<FlashcardStore>()(
           }
         })
 
-        // Auto-sync to ActiveRecall (fire-and-forget)
-        if (!flashcardSet.metadata?.isGenerating && flashcardSet.cards.length > 0) {
-          import('@/lib/active-recall-sync').then(({ buildFlashcardSyncPayload, syncToActiveRecall }) => {
-            const payload = buildFlashcardSyncPayload(flashcardSet)
-            syncToActiveRecall(payload)
-          }).catch(err => console.warn('[FlashcardStore] ActiveRecall sync skipped:', err))
-        }
+        // Standalone generated flashcards stay in Study Tools only.
+        // Plan activities sync to Active Recall through plan-scoped generation paths.
       },
 
       removeFlashcardSet: async (id: string) => {

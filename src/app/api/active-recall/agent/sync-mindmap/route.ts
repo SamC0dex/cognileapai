@@ -17,6 +17,9 @@ export async function POST(req: NextRequest) {
     if (!mindMapSetId) {
       return NextResponse.json({ error: 'Missing mindMapSetId' }, { status: 400 })
     }
+    if (!planId) {
+      return NextResponse.json({ error: 'Active Recall sync requires a study plan' }, { status: 400 })
+    }
 
     // Fetch the mind map set from the mind_map_sets table
     const { data: mindMapSet, error: fetchError } = await supabase
@@ -55,7 +58,7 @@ export async function POST(req: NextRequest) {
             source_id: card.id,
             source_set_id: mindMapSetId,
             document_id: mindMapSet.document_id || null,
-            plan_id: planId || null,
+            plan_id: planId,
             question: card.question,
             answer: card.answer,
             options: null,

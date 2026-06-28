@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     const sourceType = searchParams.get('source_type')
     const progressive = searchParams.get('progressive') === 'true'
     const includeAll = searchParams.get('include_all') === 'true'
+    const includeUnplanned = searchParams.get('include_unplanned') === 'true'
     const smart = searchParams.get('smart') === 'true'
     const minutes = searchParams.get('minutes') ? parseInt(searchParams.get('minutes')!, 10) : null
 
@@ -44,6 +45,8 @@ export async function GET(req: NextRequest) {
     }
     if (planId) {
       query = query.eq('plan_id', planId)
+    } else if (!includeUnplanned) {
+      query = query.not('plan_id', 'is', null)
     }
     if (sourceType) {
       query = query.eq('source_type', sourceType)
@@ -85,6 +88,8 @@ export async function GET(req: NextRequest) {
     }
     if (planId) {
       countQuery = countQuery.eq('plan_id', planId)
+    } else if (!includeUnplanned) {
+      countQuery = countQuery.not('plan_id', 'is', null)
     }
     if (sourceType) {
       countQuery = countQuery.eq('source_type', sourceType)

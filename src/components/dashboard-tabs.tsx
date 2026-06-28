@@ -2,7 +2,6 @@
 
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FlashcardSet } from '@/types/flashcards'
 import type { QuizSet } from '@/types/quiz'
@@ -277,7 +276,6 @@ export function DashboardTabs({
   onViewModeChange,
   onSearch
 }: DashboardTabsProps) {
-  const router = useRouter()
   const { user, loading: authLoading } = useAuth()
 
   const {
@@ -433,61 +431,29 @@ export function DashboardTabs({
   const { studyTools, flashcards, quizzes, mindMaps } = getFilteredData()
   const totalItems = studyTools.length + flashcards.length + quizzes.length + mindMaps.length
 
-  // Click handlers that navigate to chat page and open the content
-  const handleStudyToolClick = (content: StudyToolContent) => {
-    // Set up the study tool to be opened
+  const openStudyToolsPanel = () => {
     expandPanel()
-    openCanvas(content)
+    window.dispatchEvent(new Event('expand-study-tools-panel'))
+  }
 
-    // Navigate to chat page with appropriate context
-    if (content.documentId) {
-      router.push(`/chat?type=document&documentId=${content.documentId}`)
-    } else if (content.conversationId) {
-      router.push(`/chat/${content.conversationId}`)
-    } else {
-      // Fallback - navigate to general chat
-      router.push('/chat')
-    }
+  const handleStudyToolClick = (content: StudyToolContent) => {
+    openStudyToolsPanel()
+    void openCanvas(content)
   }
 
   const handleFlashcardClick = (flashcardSet: FlashcardSet) => {
-    // Set up the flashcard to be opened
-    expandPanel()
+    openStudyToolsPanel()
     openViewer(flashcardSet)
-
-    // Navigate to chat page with appropriate context
-    if (flashcardSet.documentId) {
-      router.push(`/chat?type=document&documentId=${flashcardSet.documentId}`)
-    } else if (flashcardSet.conversationId) {
-      router.push(`/chat/${flashcardSet.conversationId}`)
-    } else {
-      // Fallback - navigate to general chat
-      router.push('/chat')
-    }
   }
 
   const handleQuizClick = (quizSet: QuizSet) => {
-    expandPanel()
+    openStudyToolsPanel()
     openQuizViewer(quizSet)
-    if (quizSet.documentId) {
-      router.push(`/chat?type=document&documentId=${quizSet.documentId}`)
-    } else if (quizSet.conversationId) {
-      router.push(`/chat/${quizSet.conversationId}`)
-    } else {
-      router.push('/chat')
-    }
   }
 
   const handleMindMapClick = (mindMapSet: MindMapSet) => {
-    expandPanel()
+    openStudyToolsPanel()
     openMindMapViewer(mindMapSet)
-    if (mindMapSet.documentId) {
-      router.push(`/chat?type=document&documentId=${mindMapSet.documentId}`)
-    } else if (mindMapSet.conversationId) {
-      router.push(`/chat/${mindMapSet.conversationId}`)
-    } else {
-      router.push('/chat')
-    }
   }
 
   const tabs = [

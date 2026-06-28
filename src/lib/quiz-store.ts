@@ -209,13 +209,8 @@ export const useQuizStore = create<QuizStore>()(
           return { quizSets: [quizSet, ...state.quizSets] }
         })
 
-        // Auto-sync to ActiveRecall (fire-and-forget)
-        if (!quizSet.metadata?.isGenerating && quizSet.questions.length > 0) {
-          import('@/lib/active-recall-sync').then(({ buildQuizSyncPayload, syncToActiveRecall }) => {
-            const payload = buildQuizSyncPayload(quizSet)
-            syncToActiveRecall(payload)
-          }).catch(err => console.warn('[QuizStore] ActiveRecall sync skipped:', err))
-        }
+        // Standalone generated quizzes stay in Study Tools only.
+        // Plan activities sync to Active Recall through plan-scoped generation paths.
       },
 
       removeQuizSet: async (id: string) => {
