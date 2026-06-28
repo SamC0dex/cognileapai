@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
 
 export async function GET(req: NextRequest) {
   try {
@@ -34,19 +35,13 @@ export async function GET(req: NextRequest) {
       ? JSON.parse(plan.schedule)
       : plan.schedule
 
-    // Calculate which day number we're on (Day 1 = creation day)
-    const planCreatedDate = new Date(plan.created_at)
-    planCreatedDate.setHours(0, 0, 0, 0)
-    const todayDate = new Date()
-    todayDate.setHours(0, 0, 0, 0)
-    const currentDay = Math.max(1, Math.floor((todayDate.getTime() - planCreatedDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
-    const displayCurrentDay = Math.min(currentDay, schedule.length || currentDay)
+    const displayCurrentDay = getCalendarPlanDay(schedule, plan.created_at)
 
     // Find today's schedule — try date match first, then day number, then index fallback
     const today = new Date().toISOString().split('T')[0]
     const todaySchedule = schedule.find((d: { date: string }) => d.date === today)
-      || schedule.find((d: { day: number }) => d.day === currentDay)
-      || (currentDay <= schedule.length ? schedule[currentDay - 1] : null)
+      || schedule.find((d: { day: number }) => d.day === displayCurrentDay)
+      || (displayCurrentDay <= schedule.length ? schedule[displayCurrentDay - 1] : null)
 
     // Fetch due cards for this plan
     const { data: dueCards, count: totalDue } = await supabase

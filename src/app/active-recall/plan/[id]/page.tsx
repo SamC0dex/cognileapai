@@ -274,9 +274,10 @@ function reviewCardCountFromGeneration(result: GeneratedStudyToolResponse, fallb
 function isGenerationNeeded(activity: PlanActivity): boolean {
   if (activity.type === 'review_due_cards') return false
   if (activity.generationStatus === 'not_required') return false
+  if (activity.generationStatus === 'ready' && activity.generatedSourceId) return false
   if (activity.generationStatus === 'failed') return true
   if (activity.generationStatus === 'not_generated') return true
-  return false
+  return !activity.generatedSourceId && !!studyToolTypeForActivity(activity.type)
 }
 
 function isActivityComplete(activity: Pick<PlanActivity, 'completed' | 'completionStatus'>): boolean {

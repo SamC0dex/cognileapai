@@ -270,6 +270,12 @@ function isReminderRequest(text: string): boolean {
   return ['remind', 'reminder', 'notification', 'notify', 'push'].some((word) => normalized.includes(word))
 }
 
+function isExplicitReviewStartRequest(text: string): boolean {
+  const normalized = text.toLowerCase()
+  return /\b(start|begin|launch|open|run|do)\b/.test(normalized)
+    && /\b(review|review session|due cards|cards)\b/.test(normalized)
+}
+
 const panelSpring = {
   type: 'spring' as const,
   stiffness: 400,
@@ -929,17 +935,26 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
 
       // Final parse — extract and execute actions
       const { cleanText, actions } = parseActions(accumulated)
+      const blockedReviewAction = actions.some((action) =>
+        action.type === 'START_REVIEW' && !isExplicitReviewStartRequest(text)
+      )
+      const executableActions = actions.filter((action) =>
+        action.type !== 'START_REVIEW' || isExplicitReviewStartRequest(text)
+      )
+      const finalText = blockedReviewAction
+        ? `${cleanText}\n\nI will not start a review session until you explicitly ask me to start one.`
+        : cleanText
 
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: cleanText, actions: actions.length > 0 ? actions : undefined }
+            ? { ...m, content: finalText, actions: executableActions.length > 0 ? executableActions : undefined }
             : m
         )
       )
 
       // Auto-execute actions
-      for (const action of actions) {
+      for (const action of executableActions) {
         await new Promise((r) => setTimeout(r, 300))
         handleAgentAction(action, assistantId)
       }

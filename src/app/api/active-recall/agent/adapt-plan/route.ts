@@ -4,6 +4,7 @@ import { routedCompletion } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
 import { buildPlanAdaptationPrompt, type PlanAdaptationContext } from '@/lib/active-recall-prompts'
 import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
+import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
 
 function schedulerBucketFor(type: string): 'learn' | 'practice' | 'remember' {
   if (type === 'review_due_cards') return 'remember'
@@ -126,16 +127,7 @@ export async function POST(req: NextRequest) {
     // Parse existing schedule
     const schedule = typeof plan.schedule === 'string' ? JSON.parse(plan.schedule) : plan.schedule
 
-    // Calculate current day
-    const planCreated = new Date(plan.created_at)
-    planCreated.setHours(0, 0, 0, 0)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const computedCurrentDay = Math.max(1, Math.floor((today.getTime() - planCreated.getTime()) / (1000 * 60 * 60 * 24)) + 1)
-    const storedCurrentDay = typeof plan.current_day === 'number' && plan.current_day > 0
-      ? plan.current_day
-      : null
-    const currentDay = Math.min(schedule.length, storedCurrentDay || computedCurrentDay)
+    const currentDay = getCalendarPlanDay(schedule, plan.created_at)
 
     // Adapt only future days. Completed/current days are immutable in this module.
     const remainingSchedule = schedule.filter((d: { day: number }) => d.day > currentDay)

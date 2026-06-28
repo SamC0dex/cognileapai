@@ -5,6 +5,7 @@ import { recordUsage } from '@/lib/usage-tracker'
 import { buildAgentSystemPrompt, buildAIChatSystemPrompt, type AgentContext, type AIChatContext, type PlanPerformance } from '@/lib/active-recall-prompts'
 import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
 import { buildActiveRecallReadiness } from '@/lib/active-recall-readiness'
+import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
 import { RecallLayer } from '@/types/active-recall'
 import type { ChatMessage, TokenUsage } from '@/lib/ai-providers'
 
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
       // Fetch active agent study plans
       supabase
         .from('agent_study_plans')
-        .select('id, title, status, current_day, total_activities, completed_activities')
+        .select('id, title, status, current_day, total_activities, completed_activities, created_at, schedule')
         .eq('user_id', user.id)
         .in('status', ['active', 'paused']),
     ])
@@ -149,14 +150,22 @@ export async function POST(req: NextRequest) {
         }
       })
 
-      const activePlans = (plansResult.data || []).map((p) => ({
-        id: p.id,
-        title: p.title,
-        status: p.status,
-        currentDay: p.current_day,
-        totalActivities: p.total_activities,
-        completedActivities: p.completed_activities,
-      }))
+      const activePlans = (plansResult.data || []).map((p) => {
+        const schedule = typeof p.schedule === 'string'
+          ? JSON.parse(p.schedule)
+          : Array.isArray(p.schedule)
+            ? p.schedule
+            : []
+
+        return {
+          id: p.id,
+          title: p.title,
+          status: p.status,
+          currentDay: getCalendarPlanDay(schedule, p.created_at),
+          totalActivities: p.total_activities,
+          completedActivities: p.completed_activities,
+        }
+      })
 
       // Compute per-plan performance from review_cards
       const planPerformance: PlanPerformance[] = []

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -82,13 +83,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       ? JSON.parse(plan.schedule)
       : plan.schedule
 
-    // Calculate current day
-    const planCreated = new Date(plan.created_at)
-    planCreated.setHours(0, 0, 0, 0)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const currentDay = Math.max(1, Math.floor((today.getTime() - planCreated.getTime()) / (1000 * 60 * 60 * 24)) + 1)
-    const displayCurrentDay = Math.min(currentDay, schedule.length || currentDay)
+    const displayCurrentDay = getCalendarPlanDay(schedule, plan.created_at)
 
     // Get card counts per source type for this plan
     const { data: cards } = await supabase
