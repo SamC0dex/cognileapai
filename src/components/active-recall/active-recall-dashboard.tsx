@@ -47,6 +47,10 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
 
   const [activePlans, setActivePlans] = useState<ActivePlan[]>([])
   const [plansLoading, setPlansLoading] = useState(true)
+  // One-way flag: true after the first plan fetch resolves (never goes back to false).
+  // Prevents the empty-state condition from being bypassed during subsequent refreshes
+  // that temporarily set plansLoading=true again (window focus, agent events, etc.)
+  const [plansLoaded, setPlansLoaded] = useState(false)
   const [initialLoadExpired, setInitialLoadExpired] = useState(false)
 
   const fetchActivePlans = useCallback(async () => {
@@ -61,6 +65,7 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
       // ignore
     } finally {
       setPlansLoading(false)
+      setPlansLoaded(true)
     }
   }, [])
 
@@ -111,8 +116,8 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
     router.push('/active-recall/review')
   }
 
-  // Loading skeleton
-  if ((isLoading || plansLoading) && activePlans.length === 0 && !initialLoadExpired) {
+  // Loading skeleton — only show on the first load (before plansLoaded flips true)
+  if (!plansLoaded && activePlans.length === 0 && !initialLoadExpired) {
     return (
       <div className={cn('space-y-4 p-6', className)}>
         <div className="h-24 rounded-2xl bg-muted animate-pulse" />
@@ -126,8 +131,8 @@ export function ActiveRecallDashboard({ className, onOpenChat }: ActiveRecallDas
     )
   }
 
-  // Empty state — no plans and no cards at all
-  if (activePlans.length === 0 && !plansLoading && (!stats || stats.totalReviews === 0)) {
+  // Empty state — no plans and no prior review activity
+  if (activePlans.length === 0 && plansLoaded && (!stats || stats.totalReviews === 0)) {
     return (
       <div className={cn('p-6', className)}>
         <EmptyStateOnboarding onOpenChat={onOpenChat} />
