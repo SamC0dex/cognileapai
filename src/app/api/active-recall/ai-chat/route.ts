@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { routedCompletionStream, type ResolvedAIConfig } from '@/lib/ai-router'
+import { resolveAIConfig, routedCompletionStream, type ResolvedAIConfig } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
 import { supabase as serviceSupabase } from '@/lib/supabase'
 import { generateKieDirectPdfCompletion } from '@/lib/kie-direct-pdf'
@@ -300,9 +300,15 @@ export async function POST(req: NextRequest) {
           let finalConfig: ResolvedAIConfig | undefined
 
           if (directPdfUrls.length > 0) {
+            const resolvedConfig = await resolveAIConfig(user.id)
+            const directConfig = resolvedConfig.userConfig
+            if (!directConfig?.apiKey) {
+              throw new Error('No AI API key available for direct PDF reading. Add a Kie-compatible key in Settings or configure KIE_API_KEY on the server.')
+            }
+
             const directResult = await generateKieDirectPdfCompletion({
-              apiKey: process.env.KIE_API_KEY || '',
-              model: process.env.KIE_DEFAULT_MODEL || 'gemini-3-flash',
+              apiKey: directConfig.apiKey,
+              model: directConfig.model || process.env.KIE_DEFAULT_MODEL || 'gemini-3-flash',
               messages: aiMessages,
               pdfUrls: directPdfUrls,
               maxTokens: 3000,
@@ -312,9 +318,9 @@ export async function POST(req: NextRequest) {
             finalUsage = directResult.usage
             finalConfig = {
               source: 'server',
-              provider: 'kie',
+              provider: resolvedConfig.provider,
               model: directResult.model,
-              userConfig: null,
+              userConfig: directConfig,
             }
             controller.enqueue(encoder.encode(`0:${JSON.stringify(directResult.text)}\n`))
           } else {

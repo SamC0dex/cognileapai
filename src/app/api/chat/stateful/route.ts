@@ -302,7 +302,7 @@ export async function POST(req: NextRequest) {
 
           if (directPdfUrls.length > 0) {
             const directResult = await generateKieDirectPdfCompletion({
-              apiKey: process.env.KIE_API_KEY || '',
+              apiKey: configForStream.apiKey,
               model: actualModelId,
               messages: apiMessages,
               pdfUrls: directPdfUrls,

@@ -61,24 +61,60 @@ export async function getUserAIConfig(userId: string): Promise<UserAIConfig | nu
     .eq('user_id', userId)
     .single()
 
-  if (!prefs) return null
+  const preferredProvider = prefs?.default_provider as AIProvider | undefined
+  const preferredModel = prefs?.default_model as string | undefined
 
-  // Get the API key for the chosen provider
-  const { data: keyRow } = await supabaseAdmin
+  if (preferredProvider) {
+    // Get the API key for the chosen provider
+    const { data: keyRow } = await supabaseAdmin
+      .from('user_api_keys')
+      .select('encrypted_key, is_valid')
+      .eq('user_id', userId)
+      .eq('provider', preferredProvider)
+      .single()
+
+    if (keyRow?.is_valid) {
+      const apiKey = await decryptApiKey(keyRow.encrypted_key)
+
+      return {
+        provider: preferredProvider,
+        model: preferredModel || getDefaultModel(preferredProvider),
+        apiKey,
+      }
+    }
+  }
+
+  // If preferences are missing/stale, still prefer a user-saved key over server env.
+  const { data: keyRows } = await supabaseAdmin
     .from('user_api_keys')
-    .select('encrypted_key, is_valid')
+    .select('provider, encrypted_key, is_valid')
     .eq('user_id', userId)
-    .eq('provider', prefs.default_provider)
-    .single()
+    .eq('is_valid', true)
 
-  if (!keyRow || !keyRow.is_valid) return null
+  const fallbackKey = (keyRows || []).sort((a, b) => {
+    const order = ['kie', 'gemini', 'openrouter', 'laozhang']
+    return order.indexOf(a.provider) - order.indexOf(b.provider)
+  })[0]
 
-  const apiKey = await decryptApiKey(keyRow.encrypted_key)
+  if (!fallbackKey) return null
+
+  const provider = fallbackKey.provider as AIProvider
+  const apiKey = await decryptApiKey(fallbackKey.encrypted_key)
 
   return {
-    provider: prefs.default_provider as AIProvider,
-    model: prefs.default_model,
+    provider,
+    model: getDefaultModel(provider),
     apiKey,
+  }
+}
+
+function getDefaultModel(provider: AIProvider): string {
+  switch (provider) {
+    case 'kie': return 'gemini-3-flash'
+    case 'gemini': return 'gemini-3-flash'
+    case 'openrouter': return 'google/gemini-3-flash-preview'
+    case 'laozhang': return 'gemini-2.5-flash'
+    default: return 'gemini-3-flash'
   }
 }
 

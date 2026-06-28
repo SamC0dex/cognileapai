@@ -357,16 +357,30 @@ async function generateWithDirectPdfFallback(
   systemPrompt: string,
   userPrompt: string,
   type: string,
-  pdfUrl: string
+  pdfUrl: string,
+  apiKey: string,
+  preferredModel?: string
 ): Promise<FallbackResult> {
-  const apiKey = process.env.KIE_API_KEY
   if (!apiKey) {
-    throw new Error('Direct PDF generation requires KIE_API_KEY.')
+    throw new Error('Direct PDF generation requires a configured API key.')
   }
 
   const promptText = `${systemPrompt}\n\n${userPrompt}\n\nThe source document is attached as a PDF URL. Read the PDF directly and generate the requested study tool from its visual/document content.`
+  const models = preferredModel
+    ? [
+        MODEL_HIERARCHY.find((model) => model.name === preferredModel) || {
+          name: preferredModel,
+          maxInputTokens: 1000000,
+          baseOutputTokens: GEMINI_MAX_OUTPUT_TOKENS,
+          temperature: 0.5,
+          topK: 40,
+          maxRetries: 1,
+        },
+        ...MODEL_HIERARCHY.filter((model) => model.name !== preferredModel),
+      ]
+    : MODEL_HIERARCHY
 
-  for (const modelConfig of MODEL_HIERARCHY) {
+  for (const modelConfig of models) {
     const modelStartTime = Date.now()
     const optimalOutputTokens = getOptimalOutputTokens(type, modelConfig.name)
 
@@ -930,11 +944,24 @@ For each topic, read the source material and build a mind map that covers all th
     let usageModel = 'gemini-3-flash'
 
     if (directPdfUrl) {
-      const fallbackResult = await generateWithDirectPdfFallback(systemPrompt, userPrompt, type, directPdfUrl)
+      const directPdfConfig = userAIConfig || {
+        provider: 'kie' as const,
+        model: process.env.KIE_DEFAULT_MODEL || 'gemini-3-flash',
+        apiKey: process.env.KIE_API_KEY || '',
+      }
+      const fallbackResult = await generateWithDirectPdfFallback(
+        systemPrompt,
+        userPrompt,
+        type,
+        directPdfUrl,
+        directPdfConfig.apiKey,
+        directPdfConfig.model
+      )
       resultText = fallbackResult.resultText
       modelUsed = fallbackResult.modelUsed
       generationDuration = fallbackResult.duration
       usageModel = fallbackResult.modelUsed.split(' ')[0]
+      usageProvider = directPdfConfig.provider
 
       const inputTokens = fallbackResult.usage?.promptTokens ?? Math.ceil((systemPrompt.length + userPrompt.length) / 4)
       const outputTokens = fallbackResult.usage?.completionTokens ?? Math.ceil(resultText.length / 4)
