@@ -89,6 +89,25 @@ export const QuizViewer: React.FC<QuizViewerProps> = ({
     }))
   }
 
+  const handleAskAgentToExplain = () => {
+    if (!currentQuestion) return
+    const selected = currentAnswer?.selectedOption
+    window.dispatchEvent(new CustomEvent('open-study-agent', {
+      detail: {
+        autoSend: true,
+        prompt: [
+          'Explain this quiz question like a tutor. Use the current study plan context if available.',
+          `Quiz set: ${title}`,
+          `Question: ${currentQuestion.question}`,
+          `Options: ${currentQuestion.options.map((option, index) => `${OPTION_LABELS[index] || index + 1}. ${option}`).join(' | ')}`,
+          typeof selected === 'number' ? `User selected: ${OPTION_LABELS[selected] || selected + 1}. ${currentQuestion.options[selected]}` : null,
+          `Correct answer: ${OPTION_LABELS[currentQuestion.correctAnswer] || currentQuestion.correctAnswer + 1}. ${currentQuestion.options[currentQuestion.correctAnswer]}`,
+          currentQuestion.explanation ? `Existing explanation: ${currentQuestion.explanation}` : null,
+        ].filter(Boolean).join('\n'),
+      },
+    }))
+  }
+
   const goToNext = () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(prev => prev + 1)
@@ -613,7 +632,7 @@ export const QuizViewer: React.FC<QuizViewerProps> = ({
           )}
 
           {/* Explain button (after answering) */}
-          {isAnswered && currentQuestion.explanation && (
+          {isAnswered && (
             <motion.div
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
@@ -622,12 +641,20 @@ export const QuizViewer: React.FC<QuizViewerProps> = ({
             >
               <div className="flex items-start gap-2">
                 <BrainCircuit className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-1">Explanation</p>
                   <p className="text-sm text-blue-600/80 dark:text-blue-400/80 leading-relaxed">
-                    {currentQuestion.explanation}
+                    {currentQuestion.explanation || 'Ask the Study Agent for a step-by-step explanation of this answer.'}
                   </p>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAskAgentToExplain}
+                  className="h-7 shrink-0 px-2 text-xs"
+                >
+                  Ask Agent
+                </Button>
               </div>
             </motion.div>
           )}

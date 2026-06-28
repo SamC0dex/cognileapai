@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   X,
@@ -190,6 +190,54 @@ function getCurrentPlanId(): string | null {
   return match?.[1] || null
 }
 
+async function getCurrentPlanContextForAgent(): Promise<string | null> {
+  const planId = getCurrentPlanId()
+  if (!planId) return null
+
+  try {
+    const res = await fetch(`/api/active-recall/agent/plans/${planId}`)
+    if (!res.ok) return `[Active plan id: ${planId}]`
+    const data = await res.json()
+    const plan = data.plan
+    const stats = data.stats
+    if (!plan) return `[Active plan id: ${planId}]`
+
+    const schedule = Array.isArray(plan.schedule) ? plan.schedule : []
+    const today = schedule.find((day: { day: number }) => day.day === plan.currentDay)
+    const nextActivity = today?.activities?.find((activity: { completed?: boolean; completionStatus?: string }) =>
+      !activity.completed && activity.completionStatus !== 'completed'
+    )
+    const scheduleLines = schedule.slice(0, 10).map((day: {
+      day: number
+      date?: string
+      activities?: Array<{
+        type: string
+        topic: string
+        generationStatus?: string
+        completionStatus?: string
+        generatedSourceId?: string | null
+        reviewedCount?: number
+      }>
+    }) => {
+      const activities = (day.activities || []).map((activity) =>
+        `${activity.type}:${activity.topic} [material=${activity.generationStatus || 'unknown'}, status=${activity.completionStatus || 'unknown'}${activity.reviewedCount ? `, reviewed=${activity.reviewedCount}` : ''}${activity.generatedSourceId ? ', hasSource=true' : ''}]`
+      ).join('; ')
+      return `Day ${day.day}${day.date ? ` (${day.date})` : ''}: ${activities}`
+    }).join('\n')
+
+    return [
+      '[Active study plan context]',
+      `Plan: ${plan.title} (${plan.id})`,
+      `Status: ${plan.status}; current day ${plan.currentDay}/${plan.totalDays}; completed ${plan.completed_activities}/${plan.total_activities}`,
+      `Generated review items: ${stats?.totalCards ?? 0}; due now: ${stats?.dueCards ?? 0}`,
+      nextActivity ? `Next incomplete activity today: ${nextActivity.type} - ${nextActivity.topic}` : 'Today activities complete.',
+      `Schedule:\n${scheduleLines}`,
+    ].join('\n')
+  } catch {
+    return `[Active plan id: ${planId}]`
+  }
+}
+
 function isPlanAdaptationRequest(text: string): boolean {
   const normalized = text.toLowerCase()
   const intentWords = ['adapt', 'adjust', 'change', 'rebalance', 'reschedule', 'modify', 'easier', 'harder', 'lighter', 'more focus', 'weak']
@@ -232,9 +280,11 @@ const panelSpring = {
 interface AIChatSidebarProps {
   isOpen: boolean
   onToggle: () => void
+  pendingPrompt?: { id: string; text: string; autoSend?: boolean } | null
+  onPendingPromptHandled?: () => void
 }
 
-export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
+export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPromptHandled }: AIChatSidebarProps) {
   // Conversation management
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const convos = loadConversations()
@@ -251,7 +301,7 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
   const [showHistory, setShowHistory] = useState(false)
 
   const activeConvo = conversations.find((c) => c.id === activeConvoId) || null
-  const messages = activeConvo?.messages || []
+  const messages = useMemo(() => activeConvo?.messages || [], [activeConvo])
 
   const setMessages = useCallback((updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setConversations((prev) => {
@@ -303,8 +353,6 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
 
   // Document selection from shared context
   const {
-    documents,
-    documentsLoading,
     selectedDocuments,
     addSelectedDocument,
     removeSelectedDocument,
@@ -791,13 +839,21 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
       abortControllerRef.current = new AbortController()
 
       // Build messages for API — include doc context in the actual content sent
+      const activePlanContext = await getCurrentPlanContextForAgent()
+
       const apiMessages = updatedMessages.map((m, idx) => {
         let content = m.content
-        // Inject doc context into the first user message
-        if (idx === 0 && m.role === 'user' && selectedDocuments.length > 0) {
-          const docNames = selectedDocuments.map((d) => d.title).join(', ')
-          const docIds = selectedDocuments.map((d) => d.id)
-          content = `[Selected documents: ${docNames} (IDs: ${docIds.join(', ')})]\n\n${content}`
+        if (idx === 0 && m.role === 'user') {
+          const contextParts: string[] = []
+          if (selectedDocuments.length > 0) {
+            const docNames = selectedDocuments.map((d) => d.title).join(', ')
+            const docIds = selectedDocuments.map((d) => d.id)
+            contextParts.push(`[Selected documents: ${docNames} (IDs: ${docIds.join(', ')})]`)
+          }
+          if (activePlanContext) contextParts.push(activePlanContext)
+          if (contextParts.length > 0) {
+            content = `${contextParts.join('\n\n')}\n\n${content}`
+          }
         }
         return { role: m.role, content }
       })
@@ -902,6 +958,17 @@ export function AIChatSidebar({ isOpen, onToggle }: AIChatSidebarProps) {
       abortControllerRef.current = null
     }
   }
+
+  useEffect(() => {
+    if (!isOpen || !pendingPrompt) return
+    if (pendingPrompt.autoSend) {
+      void sendMessage(pendingPrompt.text)
+    } else {
+      setInput(pendingPrompt.text)
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+    onPendingPromptHandled?.()
+  }, [isOpen, pendingPrompt?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

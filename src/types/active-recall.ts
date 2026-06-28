@@ -556,6 +556,17 @@ export interface PlanActivity {
   // Legacy fields used by existing saved schedules and review-focused UI.
   sourceSetId?: string | null
   cardCount?: number
+  reviewedCount?: number
+  startedAt?: string | null
+  completedAt?: string | null
+  totalTimeMs?: number
+  lastSessionId?: string | null
+  schedulerReason?: string
+  schedulerWeight?: number
+  schedulerBucket?: 'learn' | 'practice' | 'remember'
+  expectedOutcome?: string
+  actualOutcome?: string
+  rescheduleReason?: string
   completed: boolean
 }
 

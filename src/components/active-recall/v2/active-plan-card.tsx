@@ -443,6 +443,7 @@ function ActivityRow({
     type: string
     topic: string
     cardCount?: number
+    reviewedCount?: number
     plannedMinutes?: number
     generationStatus?: string
     notes: string
@@ -531,14 +532,20 @@ function ActivityRow({
       <span className={cn('text-muted-foreground truncate', isCompleted && 'line-through')}>
         {activity.topic}
       </span>
-      {count ? (
+      {activity.reviewedCount && activity.reviewedCount > 0 ? (
+        <span className="text-muted-foreground ml-auto shrink-0">
+          {activity.reviewedCount} reviewed
+        </span>
+      ) : count ? (
         <span className="text-muted-foreground ml-auto shrink-0">
           {count} {unit}
         </span>
       ) : null}
-      <span className={cn('hidden sm:inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium', state.className)}>
-        {state.label}
-      </span>
+      {state ? (
+        <span className={cn('hidden sm:inline-flex shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium', state.className)}>
+          {state.label}
+        </span>
+      ) : null}
     </div>
   )
 }
@@ -572,10 +579,7 @@ function getActivityState(activity: { completed?: boolean; completionStatus?: st
   }
 
   if (activity.generationStatus === 'not_generated') {
-    return {
-      label: 'Needs material',
-      className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
-    }
+    return null
   }
 
   if (activity.generationStatus === 'generating') {

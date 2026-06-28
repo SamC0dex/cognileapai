@@ -174,6 +174,19 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   }, [isFilesPanelOpen, handleFilesPanelToggle])
 
+  React.useEffect(() => {
+    const handleExpandStudyToolsPanel = () => {
+      if (!isStudyToolsPanelOpen) {
+        handleStudyToolsPanelToggle()
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('expand-study-tools-panel', handleExpandStudyToolsPanel)
+      return () => window.removeEventListener('expand-study-tools-panel', handleExpandStudyToolsPanel)
+    }
+  }, [isStudyToolsPanelOpen, handleStudyToolsPanelToggle])
+
   return (
     <DocumentsProvider>
       <div className="flex h-screen overflow-hidden bg-background optimized-container" data-app-content>

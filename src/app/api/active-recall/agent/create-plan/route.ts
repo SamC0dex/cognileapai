@@ -134,6 +134,41 @@ function normalizeActivityType(type: unknown): PlanActivityType {
   return 'review_due_cards'
 }
 
+function normalizeSchedulerBucket(value: unknown, type: PlanActivityType): 'learn' | 'practice' | 'remember' {
+  if (value === 'learn' || value === 'practice' || value === 'remember') return value
+  if (type === 'review_due_cards') return 'remember'
+  if (type === 'flashcards' || type === 'quiz') return 'practice'
+  return 'learn'
+}
+
+function defaultSchedulerReason(type: PlanActivityType): string {
+  if (type === 'review_due_cards') return 'Protect retention with spaced review pressure.'
+  if (type === 'flashcards') return 'Convert material into active recall prompts.'
+  if (type === 'quiz') return 'Check retrieval and application after learning.'
+  if (type === 'mindmap') return 'Build relationships between concepts before recall.'
+  if (type === 'smart_notes') return 'Organize dense material into reviewable structure.'
+  if (type === 'summary') return 'Create a first-pass mental model before practice.'
+  return 'Study the core explanation for this topic.'
+}
+
+function defaultExpectedOutcome(type: PlanActivityType): string {
+  if (type === 'review_due_cards') return 'Due review cleared or reduced.'
+  if (type === 'flashcards') return 'Recall prompts generated and practiced.'
+  if (type === 'quiz') return 'Knowledge gaps exposed with scored practice.'
+  if (type === 'mindmap') return 'Concept relationships reviewed visually.'
+  if (type === 'smart_notes') return 'Key details condensed into notes.'
+  if (type === 'summary') return 'Topic understood at overview level.'
+  return 'Topic studied with usable reference material.'
+}
+
+function defaultSchedulerWeight(type: PlanActivityType): number {
+  if (type === 'review_due_cards') return 0.95
+  if (type === 'quiz') return 0.85
+  if (type === 'flashcards') return 0.8
+  if (type === 'mindmap') return 0.65
+  return 0.6
+}
+
 function normalizeActivity(
   activity: Record<string, unknown>,
   documentIds: string[],
@@ -179,6 +214,22 @@ function normalizeActivity(
     notes: typeof activity.notes === 'string' ? activity.notes : '',
     sourceSetId: typeof activity.sourceSetId === 'string' ? activity.sourceSetId : generatedSourceId,
     cardCount,
+    startedAt: typeof activity.startedAt === 'string' ? activity.startedAt : null,
+    completedAt: typeof activity.completedAt === 'string' ? activity.completedAt : null,
+    totalTimeMs: typeof activity.totalTimeMs === 'number' ? activity.totalTimeMs : undefined,
+    lastSessionId: typeof activity.lastSessionId === 'string' ? activity.lastSessionId : null,
+    schedulerReason: typeof activity.schedulerReason === 'string' && activity.schedulerReason.trim()
+      ? activity.schedulerReason.trim()
+      : defaultSchedulerReason(type),
+    schedulerWeight: typeof activity.schedulerWeight === 'number' && Number.isFinite(activity.schedulerWeight)
+      ? Math.min(1, Math.max(0, activity.schedulerWeight))
+      : defaultSchedulerWeight(type),
+    schedulerBucket: normalizeSchedulerBucket(activity.schedulerBucket, type),
+    expectedOutcome: typeof activity.expectedOutcome === 'string' && activity.expectedOutcome.trim()
+      ? activity.expectedOutcome.trim()
+      : defaultExpectedOutcome(type),
+    actualOutcome: typeof activity.actualOutcome === 'string' ? activity.actualOutcome : undefined,
+    rescheduleReason: typeof activity.rescheduleReason === 'string' ? activity.rescheduleReason : undefined,
     completed,
   }
 }
@@ -222,6 +273,135 @@ function buildPlannedActivity(
     generatedSourceId: null,
     completionStatus: 'not_started',
   }, [documentId], Date.now())
+}
+
+function activity(
+  type: PlanActivityType,
+  documentId: string,
+  topic: string,
+  plannedMinutes: number,
+  notes: string,
+  cardCount?: number
+) {
+  return {
+    type,
+    documentId,
+    topic,
+    plannedMinutes,
+    cardCount,
+    generationStatus: type === 'review_due_cards' ? 'not_required' : 'not_generated',
+    generatedSourceId: null,
+    completionStatus: 'not_started',
+    notes,
+    schedulerReason: defaultSchedulerReason(type),
+    schedulerWeight: defaultSchedulerWeight(type),
+    schedulerBucket: normalizeSchedulerBucket(undefined, type),
+    expectedOutcome: defaultExpectedOutcome(type),
+  }
+}
+
+function fallbackTopics(
+  documentContext: DocumentContext[],
+  weakTopics: string[],
+  strongTopics: string[]
+): string[] {
+  const sectionTopics = documentContext.flatMap((doc) => doc.sectionTitles || [])
+  const documentTitles = documentContext.map((doc) => doc.title).filter(Boolean)
+  const rawTopics = [
+    ...weakTopics,
+    ...sectionTopics,
+    ...strongTopics,
+    ...documentTitles,
+    'Core concepts',
+    'High-priority exam topics',
+    'Weak areas',
+    'Mixed review',
+  ]
+
+  const seen = new Set<string>()
+  return rawTopics
+    .map((topic) => topic.trim())
+    .filter((topic) => {
+      if (!topic || seen.has(topic.toLowerCase())) return false
+      seen.add(topic.toLowerCase())
+      return true
+    })
+}
+
+function buildFallbackSchedule(params: {
+  dates: string[]
+  documentContext: DocumentContext[]
+  weakTopics: string[]
+  strongTopics: string[]
+  dailyMinutes: number
+  priorKnowledge: PriorKnowledge
+  currentUnderstanding: CurrentUnderstanding
+  totalCards: number
+}): Array<{ day: number; date: string; activities: Array<Record<string, unknown>> }> {
+  const {
+    dates,
+    documentContext,
+    weakTopics,
+    strongTopics,
+    dailyMinutes,
+    priorKnowledge,
+    currentUnderstanding,
+    totalCards,
+  } = params
+  const documentId = documentContext[0]?.id
+  if (!documentId) return []
+
+  const topics = fallbackTopics(documentContext, weakTopics, strongTopics)
+  const isNewLearner = priorKnowledge === 'new' || currentUnderstanding === 'new'
+  const availableMinutes = Math.max(20, dailyMinutes)
+
+  return dates.map((date, index) => {
+    const dayNumber = index + 1
+    const primaryTopic = topics[index % topics.length]
+    const secondaryTopic = topics[(index + 1) % topics.length]
+    const finalDay = index === dates.length - 1
+    const earlyDay = index < Math.min(2, dates.length)
+    const activities: Array<Record<string, unknown>> = []
+
+    if (isNewLearner && earlyDay) {
+      activities.push(
+        activity(index === 0 ? 'summary' : 'smart_notes', documentId, primaryTopic, Math.min(15, availableMinutes), index === 0
+          ? 'Build a clear first-pass understanding before testing.'
+          : 'Turn the topic into organized notes and examples.')
+      )
+      activities.push(
+        activity('mindmap', documentId, secondaryTopic, Math.min(15, availableMinutes), 'Map relationships so the topic is easier to recall.')
+      )
+    } else if (finalDay) {
+      if (totalCards > 0) {
+        activities.push(activity('review_due_cards', documentId, 'Final due-card sweep', 10, 'Review due cards before the final check.', 20))
+      }
+      activities.push(activity('quiz', documentId, primaryTopic, 15, 'Use exam-style questions to expose remaining gaps.', 10))
+      activities.push(activity('flashcards', documentId, secondaryTopic, 10, 'Finish with active recall on weak facts.', 12))
+    } else {
+      const pattern = index % 3
+      if (pattern === 0) {
+        activities.push(activity('study_guide', documentId, primaryTopic, 15, 'Study the highest-yield explanation for this topic.'))
+        activities.push(activity('flashcards', documentId, primaryTopic, 15, 'Convert the topic into recall prompts.', 15))
+      } else if (pattern === 1) {
+        activities.push(activity('smart_notes', documentId, primaryTopic, 12, 'Condense details into memory-friendly notes.'))
+        activities.push(activity('quiz', documentId, primaryTopic, 15, 'Check whether the concept can be applied.', 8))
+      } else {
+        activities.push(activity('mindmap', documentId, primaryTopic, 12, 'Review relationships and dependencies visually.'))
+        activities.push(activity('flashcards', documentId, secondaryTopic, 12, 'Reinforce related definitions and steps.', 12))
+      }
+    }
+
+    if (totalCards > 0 && dayNumber > 1 && dayNumber % 2 === 0 && activities.length < 3) {
+      activities.push(activity('review_due_cards', documentId, 'Due review', 8, 'Protect retention with spaced review.', 15))
+    }
+
+    return {
+      day: dayNumber,
+      date,
+      activities,
+    }
+  })
 }
 
 function alignScheduleWithOnboarding(
@@ -503,28 +683,29 @@ Progressive Learning Model:
 - Practice: flashcards and quizzes test understanding after learning activities.
 - Remember: due-card review uses SM-2; you set daily focus and time, but do not generate material upfront.
 
-CRITICAL: You MUST generate EXACTLY ${daysCount} days in the schedule. Each day MUST have 2-4 activities.
+CRITICAL: You MUST generate EXACTLY ${daysCount} days in the schedule. Each day should fit the user's daily minute budget; use 1-6 activities depending on available time, difficulty, due-review pressure, and timeline urgency. Do not force the same count every day.
 
 Output a JSON array with EXACTLY ${daysCount} day objects:
 [{
   "day": 1,
   "date": "${dates[0]}",
   "activities": [
-    { "type": "summary", "documentId": "${planDocumentIds[0]}", "topic": "...", "plannedMinutes": 15, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "..." },
-    { "type": "flashcards", "documentId": "${planDocumentIds[0]}", "topic": "...", "plannedMinutes": 15, "cardCount": 15, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "..." },
-    { "type": "review_due_cards", "documentId": "${planDocumentIds[0]}", "topic": "...", "plannedMinutes": 10, "cardCount": 10, "generationStatus": "not_required", "generatedSourceId": null, "completionStatus": "not_started", "notes": "..." }
+    { "type": "summary", "documentId": "${planDocumentIds[0]}", "topic": "...", "plannedMinutes": 15, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "...", "schedulerReason": "why this is scheduled today", "schedulerBucket": "learn", "schedulerWeight": 0.7, "expectedOutcome": "what completion should prove" },
+    { "type": "flashcards", "documentId": "${planDocumentIds[0]}", "topic": "...", "plannedMinutes": 15, "cardCount": 15, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "...", "schedulerReason": "why recall practice belongs here", "schedulerBucket": "practice", "schedulerWeight": 0.8, "expectedOutcome": "what recall should improve" },
+    { "type": "review_due_cards", "documentId": "${planDocumentIds[0]}", "topic": "...", "plannedMinutes": 10, "cardCount": 10, "generationStatus": "not_required", "generatedSourceId": null, "completionStatus": "not_started", "notes": "...", "schedulerReason": "why spaced review is needed", "schedulerBucket": "remember", "schedulerWeight": 0.95, "expectedOutcome": "due review cleared" }
   ]
 },
 ... (${daysCount} total days through day ${daysCount} on ${dates[dates.length - 1]})]
 
 Rules:
 - activity type must be one of: study_guide, summary, smart_notes, mindmap, flashcards, quiz, review_due_cards
-- Every activity must include: type, documentId, topic, plannedMinutes, generationStatus, generatedSourceId, completionStatus, notes
+- Every activity must include: type, documentId, topic, plannedMinutes, generationStatus, generatedSourceId, completionStatus, notes, schedulerReason, schedulerBucket, schedulerWeight, expectedOutcome
 - Use cardCount only for flashcards, quiz, and review_due_cards
 - Do not generate material or invent generatedSourceId values during plan creation; use null unless the material already exists
 - ${daysCount <= 3 ? 'CRAM MODE: increase daily cards to 50, focus on weak areas, no rest days' : daysCount <= 7 ? 'SHORT timeline: be focused and efficient, cover all topics, no rest days' : 'normal pacing, include 1 rest/light day per week if > 10 days'}
 - Front-load Learn activities when prior knowledge is new; use more Remember/Practice if this is review-focused
 - Keep each day's plannedMinutes total at or below ${normalizedDailyMinutes} unless the timeline is too short
+- Vary daily activity count naturally: light days can have 1-2 focused activities, standard days usually 2-4, intensive/cram days can have 4-6 if the minute budget supports it
 - Preferred intensity is ${normalizedIntensity}; light means fewer activities and easier pacing, intensive means more practice but still within daily time
 - For new learners, schedule Learn activities before heavy quizzes; for retention/review learners, prioritize review_due_cards, flashcards, and quizzes
 - Scale pacing by document size and inferred difficulty; harder or longer documents need more Learn time and smaller topic chunks
@@ -581,26 +762,31 @@ Generate the ${daysCount}-day study schedule as JSON. Remember: EXACTLY ${daysCo
       }
     } catch (parseError) {
       console.error('[CreatePlan] JSON parse error:', parseError, 'Raw text:', text.slice(0, 500))
-      return NextResponse.json({ error: 'Failed to parse study plan' }, { status: 500 })
+      schedule = []
+    }
+
+    const fallbackSchedule = buildFallbackSchedule({
+      dates,
+      documentContext,
+      weakTopics,
+      strongTopics,
+      dailyMinutes: normalizedDailyMinutes,
+      priorKnowledge: normalizedPriorKnowledge,
+      currentUnderstanding: normalizedCurrentUnderstanding,
+      totalCards,
+    })
+
+    if (!Array.isArray(schedule) || schedule.length === 0) {
+      console.warn('[CreatePlan] AI generated no usable schedule, using deterministic fallback schedule')
+      schedule = fallbackSchedule
     }
 
     // Ensure schedule has correct dates and fill in missing days
     if (schedule.length < daysCount) {
-      console.warn(`[CreatePlan] AI only generated ${schedule.length}/${daysCount} days, padding remaining days`)
-      // Use last day as template for missing days
-      const templateActivities = schedule.length > 0
-        ? schedule[schedule.length - 1].activities.map(a => ({ ...a, notes: 'Spaced review session' }))
-        : [
-            { type: 'summary', documentId: planDocumentIds[0], topic: 'Core concepts', plannedMinutes: 15, generationStatus: 'not_generated', generatedSourceId: null, completionStatus: 'not_started', notes: 'Build a quick overview before practice' },
-            { type: 'flashcards', documentId: planDocumentIds[0], topic: 'Mixed review', plannedMinutes: 15, cardCount: 15, generationStatus: 'not_generated', generatedSourceId: null, completionStatus: 'not_started', notes: 'Review all topics' },
-          ]
+      console.warn(`[CreatePlan] AI only generated ${schedule.length}/${daysCount} days, filling remaining days with fallback schedule`)
 
       for (let i = schedule.length; i < daysCount; i++) {
-        schedule.push({
-          day: i + 1,
-          date: dates[i],
-          activities: templateActivities.map(a => ({ ...a })),
-        })
+        schedule.push(fallbackSchedule[i])
       }
     }
 
@@ -656,7 +842,7 @@ Generate the ${daysCount}-day study schedule as JSON. Remember: EXACTLY ${daysCo
         document_ids: planDocumentIds,
         exam_id: examId || null,
         onboarding_context: onboardingContext,
-        schedule: JSON.stringify(normalizedSchedule),
+        schedule: normalizedSchedule,
         status: 'active',
         current_day: 1,
         total_activities: totalActivities,

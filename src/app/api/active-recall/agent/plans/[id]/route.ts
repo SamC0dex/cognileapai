@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 
 type Params = { params: Promise<{ id: string }> }
 
+type ScheduleDayRecord = Record<string, unknown> & {
+  activities: Array<Record<string, unknown>>
+}
+
 function activityMatchesCompletedTypes(activityType: string, completedTypes: string[]) {
   if (completedTypes.includes(activityType)) return true
 
@@ -17,6 +21,40 @@ function activityMatchesCompletedTypes(activityType: string, completedTypes: str
   }
 
   return (equivalents[activityType] || []).some((type) => completedTypes.includes(type))
+}
+
+function cloneSchedule(scheduleValue: unknown): ScheduleDayRecord[] {
+  const parsed = typeof scheduleValue === 'string'
+    ? JSON.parse(scheduleValue)
+    : Array.isArray(scheduleValue)
+      ? scheduleValue as Array<Record<string, unknown>>
+      : []
+
+  return parsed.map((d: Record<string, unknown>) => ({
+    ...d,
+    activities: Array.isArray(d.activities)
+      ? d.activities.map((activity) => ({ ...(activity as Record<string, unknown>) }))
+      : [],
+  }))
+}
+
+function activitySessionMetrics(activity: Record<string, unknown>, durationMs: number) {
+  const type = String(activity.type || '')
+  const plannedMinutes = typeof activity.plannedMinutes === 'number' ? activity.plannedMinutes : 0
+  const reviewedCount = typeof activity.reviewedCount === 'number'
+    ? activity.reviewedCount
+    : typeof activity.cardCount === 'number'
+      ? activity.cardCount
+      : plannedMinutes
+
+  return {
+    activityType: type,
+    plannedMinutes,
+    durationMs,
+    reviewedCount,
+    generatedSourceId: activity.generatedSourceId || activity.sourceSetId || null,
+    generatedSourceType: activity.generatedSourceType || null,
+  }
 }
 
 // GET /api/active-recall/agent/plans/[id] — full plan with schedule
@@ -68,6 +106,17 @@ export async function GET(req: NextRequest, { params }: Params) {
       cardsByLayer[c.recall_layer || 'ABSORB'] = (cardsByLayer[c.recall_layer || 'ABSORB'] || 0) + 1
     })
 
+    const { data: activitySessions } = await supabase
+      .from('plan_activity_sessions')
+      .select('id, plan_day, activity_index, activity_type, topic, status, started_at, completed_at, duration_ms, result_metrics')
+      .eq('user_id', user.id)
+      .eq('plan_id', id)
+      .order('started_at', { ascending: false })
+      .limit(20)
+
+    const completedActivitySessions = (activitySessions || []).filter((session) => session.status === 'completed')
+    const totalActivityTimeMs = completedActivitySessions.reduce((sum, session) => sum + (session.duration_ms || 0), 0)
+
     return NextResponse.json({
       plan: {
         ...plan,
@@ -80,6 +129,8 @@ export async function GET(req: NextRequest, { params }: Params) {
         dueCards,
         cardsByType,
         cardsByLayer,
+        activitySessions: activitySessions || [],
+        totalActivityTimeMs,
       },
     })
   } catch (error) {
@@ -144,12 +195,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     if (action === 'complete_activity') {
       const { day, activityIndex } = body
-      const schedule = typeof plan.schedule === 'string'
-        ? JSON.parse(plan.schedule)
-        : [...plan.schedule]
+      const schedule = cloneSchedule(plan.schedule)
 
       // Find the day entry
-      const dayEntry = schedule.find((d: { day: number }) => d.day === day)
+      const dayEntry = schedule.find((d) => d.day === day)
       if (!dayEntry || !dayEntry.activities[activityIndex]) {
         return NextResponse.json({ error: 'Activity not found' }, { status: 400 })
       }
@@ -157,12 +206,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       const wasCompleted = !!dayEntry.activities[activityIndex].completed
       dayEntry.activities[activityIndex].completed = !wasCompleted
       dayEntry.activities[activityIndex].completionStatus = !wasCompleted ? 'completed' : 'not_started'
-      dayEntry.isCompleted = dayEntry.activities.every((a: { completed?: boolean; completionStatus?: string }) =>
+      dayEntry.isCompleted = dayEntry.activities.every((a) =>
         a.completed || a.completionStatus === 'completed'
       )
 
       const completedActivities = Math.max(0, (plan.completed_activities || 0) + (wasCompleted ? -1 : 1))
-      const allPlanDone = schedule.every((d: { isCompleted?: boolean }) => d.isCompleted)
+      const allPlanDone = schedule.every((d) => !!d.isCompleted)
 
       const { error } = await supabase
         .from('agent_study_plans')
@@ -179,6 +228,145 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         return NextResponse.json({ error: 'Failed to update activity' }, { status: 500 })
       }
       return NextResponse.json({ success: true, completedActivities, planCompleted: allPlanDone, toggled: !wasCompleted })
+    }
+
+    if (action === 'set_activity_completion') {
+      const { day, activityIndex, completionStatus, sessionId, durationMs } = body as {
+        day: number
+        activityIndex: number
+        completionStatus: 'not_started' | 'in_progress' | 'completed' | 'skipped'
+        sessionId?: string | null
+        durationMs?: number
+      }
+      const allowedStatuses = new Set(['not_started', 'in_progress', 'completed', 'skipped'])
+      if (!allowedStatuses.has(completionStatus)) {
+        return NextResponse.json({ error: 'Invalid completion status' }, { status: 400 })
+      }
+
+      const schedule = cloneSchedule(plan.schedule)
+
+      const dayEntry = schedule.find((d) => d.day === day)
+      if (!dayEntry || !dayEntry.activities[activityIndex]) {
+        return NextResponse.json({ error: 'Activity not found' }, { status: 400 })
+      }
+
+      const activity = dayEntry.activities[activityIndex]
+      const wasCompleted = !!activity.completed || activity.completionStatus === 'completed'
+      const isCompleted = completionStatus === 'completed'
+      activity.completionStatus = completionStatus
+      activity.completed = isCompleted
+      const now = new Date().toISOString()
+      if (completionStatus === 'in_progress') {
+        activity.startedAt = typeof activity.startedAt === 'string' ? activity.startedAt : now
+      }
+      if (isCompleted) {
+        activity.completedAt = now
+        if (typeof durationMs === 'number' && Number.isFinite(durationMs)) {
+          activity.totalTimeMs = Math.max(0, Math.round(durationMs))
+        }
+        if (sessionId) activity.lastSessionId = sessionId
+      }
+      dayEntry.isCompleted = dayEntry.activities.every((a) =>
+        a.completed || a.completionStatus === 'completed'
+      )
+
+      const completedActivities = Math.max(0, (plan.completed_activities || 0) + (wasCompleted === isCompleted ? 0 : isCompleted ? 1 : -1))
+      const allPlanDone = schedule.every((d) => !!d.isCompleted)
+
+      const { error } = await supabase
+        .from('agent_study_plans')
+        .update({
+          schedule,
+          completed_activities: completedActivities,
+          status: allPlanDone ? 'completed' : (plan.status === 'completed' ? 'active' : plan.status),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('user_id', user.id)
+
+      if (error) {
+        return NextResponse.json({ error: 'Failed to update activity completion' }, { status: 500 })
+      }
+
+      if (isCompleted && sessionId) {
+        const safeDuration = typeof durationMs === 'number' && Number.isFinite(durationMs)
+          ? Math.max(0, Math.round(durationMs))
+          : null
+        await supabase
+          .from('plan_activity_sessions')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            duration_ms: safeDuration,
+            result_metrics: activitySessionMetrics(activity, safeDuration || 0),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', sessionId)
+          .eq('user_id', user.id)
+          .eq('plan_id', id)
+      }
+
+      return NextResponse.json({ success: true, activity, completedActivities, planCompleted: allPlanDone })
+    }
+
+    if (action === 'start_activity_session') {
+      const { day, activityIndex } = body as { day: number; activityIndex: number }
+      const schedule = cloneSchedule(plan.schedule)
+      const dayEntry = schedule.find((d) => d.day === day)
+      if (!dayEntry || !dayEntry.activities[activityIndex]) {
+        return NextResponse.json({ error: 'Activity not found' }, { status: 400 })
+      }
+
+      const activity = dayEntry.activities[activityIndex]
+      const now = new Date().toISOString()
+      activity.completionStatus = activity.completed ? 'completed' : 'in_progress'
+      activity.startedAt = typeof activity.startedAt === 'string' ? activity.startedAt : now
+
+      const { data: session, error: sessionError } = await supabase
+        .from('plan_activity_sessions')
+        .insert({
+          user_id: user.id,
+          plan_id: id,
+          activity_id: typeof activity.id === 'string' ? activity.id : null,
+          plan_day: day,
+          activity_index: activityIndex,
+          activity_type: String(activity.type || 'unknown'),
+          document_id: typeof activity.documentId === 'string' ? activity.documentId : null,
+          generated_source_id: typeof activity.generatedSourceId === 'string'
+            ? activity.generatedSourceId
+            : typeof activity.sourceSetId === 'string'
+              ? activity.sourceSetId
+              : null,
+          generated_source_type: typeof activity.generatedSourceType === 'string' ? activity.generatedSourceType : null,
+          topic: typeof activity.topic === 'string' ? activity.topic : null,
+          planned_minutes: typeof activity.plannedMinutes === 'number' ? activity.plannedMinutes : null,
+          scheduler_context: {
+            reason: activity.schedulerReason || null,
+            bucket: activity.schedulerBucket || null,
+            weight: activity.schedulerWeight || null,
+            expectedOutcome: activity.expectedOutcome || null,
+          },
+        })
+        .select('id, started_at')
+        .single()
+
+      if (sessionError || !session) {
+        return NextResponse.json({ error: 'Failed to start activity session' }, { status: 500 })
+      }
+
+      activity.lastSessionId = session.id
+
+      const { error } = await supabase
+        .from('agent_study_plans')
+        .update({ schedule, updated_at: now })
+        .eq('id', id)
+        .eq('user_id', user.id)
+
+      if (error) {
+        return NextResponse.json({ error: 'Failed to update activity session state' }, { status: 500 })
+      }
+
+      return NextResponse.json({ success: true, session, activity })
     }
 
     if (action === 'update_activity_generation') {
@@ -247,10 +435,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     if (action === 'complete_session') {
       // Mark all matching activities for today as complete
-      const { completedTypes } = body as { completedTypes: string[] }
+      const { completedTypes, completedSourceSetIds, reviewedCountBySourceSet } = body as {
+        completedTypes: string[]
+        completedSourceSetIds?: string[]
+        reviewedCountBySourceSet?: Record<string, number>
+      }
       if (!completedTypes?.length) {
         return NextResponse.json({ success: true, updated: 0 })
       }
+      const sourceSetIds = new Set((completedSourceSetIds || []).filter(Boolean))
+      const hasSourceSetScope = sourceSetIds.size > 0
 
       const schedule = typeof plan.schedule === 'string'
         ? JSON.parse(plan.schedule)
@@ -274,9 +468,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
       let updated = 0
       for (const activity of dayEntry.activities) {
-        if (!activity.completed && activity.completionStatus !== 'completed' && activityMatchesCompletedTypes(activity.type, completedTypes)) {
+        const generatedId = activity.generatedSourceId || activity.sourceSetId
+        const matchesSourceSet = !!generatedId && sourceSetIds.has(generatedId)
+        const matchesType = !hasSourceSetScope && activityMatchesCompletedTypes(activity.type, completedTypes)
+        if (!activity.completed && activity.completionStatus !== 'completed' && (matchesSourceSet || matchesType)) {
           activity.completed = true
           activity.completionStatus = 'completed'
+          if (matchesSourceSet && generatedId && reviewedCountBySourceSet?.[generatedId]) {
+            activity.reviewedCount = Math.max(0, Math.round(reviewedCountBySourceSet[generatedId]))
+          }
           updated++
         }
       }

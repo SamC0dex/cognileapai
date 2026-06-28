@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, useCallback, useMemo, useRef, Suspense } from 'react'
+import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence, useMotionValue, useTransform, PanInfo } from 'framer-motion'
 import {
@@ -56,7 +56,6 @@ function ReviewPageInner() {
     ratings,
     feedback,
     isRating,
-    isLoadingFeedback,
     startedAt,
     cardRevealedAt,
     initSession,
@@ -78,13 +77,7 @@ function ReviewPageInner() {
   const [mindMapData, setMindMapData] = useState<{ setId: string; data: MindMapSet } | null>(null)
   const [mindMapLoading, setMindMapLoading] = useState(false)
 
-  const {
-    dueCards,
-    fetchDueCards,
-    fetchStats,
-    startSession: createServerSession,
-    stats,
-  } = useActiveRecallStore()
+  const { stats } = useActiveRecallStore()
 
   const searchParams = useSearchParams()
   const planId = searchParams.get('plan_id')
@@ -285,6 +278,12 @@ function ReviewPageInner() {
 
     // Mark matching plan activities as complete
     if (planId && cards.length > 0) {
+      const reviewedCountBySourceSet = cards.reduce<Record<string, number>>((acc, card) => {
+        if (card.source_set_id) {
+          acc[card.source_set_id] = (acc[card.source_set_id] || 0) + 1
+        }
+        return acc
+      }, {})
       const completedTypes = [...new Set(cards.map(c => {
         if (c.source_type === 'flashcard') return ['flashcards', 'flashcard_review']
         if (c.source_type === 'quiz') return ['quiz', 'quiz_session']
@@ -295,7 +294,12 @@ function ReviewPageInner() {
         fetch(`/api/active-recall/agent/plans/${planId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'complete_session', completedTypes }),
+          body: JSON.stringify({
+            action: 'complete_session',
+            completedTypes,
+            completedSourceSetIds: Object.keys(reviewedCountBySourceSet),
+            reviewedCountBySourceSet,
+          }),
         }).catch(() => {})
       }
     }
@@ -421,9 +425,9 @@ function ReviewPageInner() {
       <SessionSummaryV2
         ratings={ratings}
         totalCards={cards.length}
+        typeCounts={typeCounts}
         startedAt={startedAt}
         feedback={feedback}
-        isLoadingFeedback={isLoadingFeedback}
         streak={stats?.reviewStreak}
         onClose={handleClose}
         analysisInsights={analysisInsights}
@@ -681,6 +685,19 @@ function SwipeableCard({
   const handleExplain = async () => {
     if (isExplaining || explanation) return
     setIsExplaining(true)
+    window.dispatchEvent(new CustomEvent('open-study-agent', {
+      detail: {
+        autoSend: true,
+        prompt: [
+          'Explain this active recall card like a tutor. Use the current study plan context if available.',
+          `Question: ${card.question}`,
+          `Correct answer: ${card.answer}`,
+          card.topic ? `Topic: ${card.topic}` : null,
+          card.source_type ? `Source type: ${card.source_type}` : null,
+          isQuizCard && card.options?.length ? `Options: ${card.options.join(' | ')}` : null,
+        ].filter(Boolean).join('\n'),
+      },
+    }))
     try {
       const res = await fetch('/api/active-recall/explain-card', {
         method: 'POST',
@@ -770,9 +787,6 @@ function SwipeableCard({
               card={card}
               showAnswer={showAnswer}
               onSelectOption={onFlip}
-              explanation={explanation}
-              isExplaining={isExplaining}
-              onExplain={handleExplain}
             />
           ) : (
             <FlashcardContent
@@ -852,16 +866,10 @@ function QuizCardContent({
   card,
   showAnswer,
   onSelectOption,
-  explanation,
-  isExplaining,
-  onExplain,
 }: {
   card: ReviewCardType
   showAnswer: boolean
   onSelectOption: () => void
-  explanation: string | null
-  isExplaining: boolean
-  onExplain: () => void
 }) {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const correctIndex = card.correct_answer ?? -1
@@ -1071,30 +1079,40 @@ function RatingButtonsV2({
 function SessionSummaryV2({
   ratings,
   totalCards,
+  typeCounts,
   startedAt,
   feedback,
-  isLoadingFeedback,
   streak,
   onClose,
   analysisInsights,
 }: {
   ratings: import('@/types/active-recall').ReviewSessionResult[]
   totalCards: number
+  typeCounts: Record<string, number>
   startedAt: Date | null
   feedback: import('@/types/active-recall').SessionFeedback | null
-  isLoadingFeedback: boolean
   streak?: number
   onClose: () => void
   analysisInsights?: import('@/types/active-recall').SessionAnalysisInsights | null
 }) {
-  const correctCount = ratings.filter((r) => r.rating >= 3).length
-  const accuracy = totalCards > 0 ? Math.round((correctCount / totalCards) * 100) : 0
-  const totalTimeMs = startedAt ? Date.now() - startedAt.getTime() : 0
+  const strongRecallCount = ratings.filter((r) => r.rating >= 3).length
+  const strongRecallRate = totalCards > 0 ? Math.round((strongRecallCount / totalCards) * 100) : 0
+  const isQuizOnly = totalCards > 0 && typeCounts.quiz === totalCards
+  const metricLabel = isQuizOnly ? 'Accuracy' : 'Recall strength'
+  const countLabel = isQuizOnly ? 'Correct' : 'Good+ ratings'
+  const measuredReviewMs = ratings.reduce((sum, result) => sum + Math.max(0, result.response_time_ms || 0), 0)
+  const totalTimeMs = measuredReviewMs || (startedAt ? Date.now() - startedAt.getTime() : 0)
   const totalTimeSec = Math.round(totalTimeMs / 1000)
   const minutes = Math.floor(totalTimeSec / 60)
   const seconds = totalTimeSec % 60
   const promotions = ratings.filter((r) => r.new_layer > r.previous_layer).length
   const demotions = ratings.filter((r) => r.new_layer < r.previous_layer).length
+  const avgSecondsPerItem = totalCards > 0 ? Math.round(totalTimeSec / totalCards) : 0
+  const itemMix = [
+    typeCounts.flashcard ? `${typeCounts.flashcard} flashcard${typeCounts.flashcard === 1 ? '' : 's'}` : null,
+    typeCounts.quiz ? `${typeCounts.quiz} quiz question${typeCounts.quiz === 1 ? '' : 's'}` : null,
+    typeCounts.mindmap ? `${typeCounts.mindmap} mind map item${typeCounts.mindmap === 1 ? '' : 's'}` : null,
+  ].filter(Boolean).join(' + ')
 
   return (
     <div className="flex items-center justify-center p-6 min-h-[60vh]">
@@ -1121,16 +1139,27 @@ function SessionSummaryV2({
 
           {/* Stats */}
           <div className="grid grid-cols-2 gap-3 mb-6">
-            <StatBox icon={<Target className="h-5 w-5 text-green-500" />} value={`${accuracy}%`} label="Accuracy" />
+            <StatBox icon={<Target className="h-5 w-5 text-green-500" />} value={`${strongRecallRate}%`} label={metricLabel} />
             <StatBox
               icon={<Clock className="h-5 w-5 text-blue-500" />}
               value={minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`}
-              label="Time"
+              label="Review time"
             />
-            <StatBox value={`${correctCount}/${totalCards}`} label="Correct" />
+            <StatBox value={`${strongRecallCount}/${totalCards}`} label={countLabel} />
             {streak !== undefined && streak > 0 && (
               <StatBox icon={<Flame className="h-5 w-5 text-orange-500" />} value={`${streak}`} label="Streak" />
             )}
+          </div>
+
+          <div className="mb-6 rounded-lg border bg-muted/30 p-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Reviewed</span>
+              <span className="text-right font-medium">{itemMix || `${totalCards} items`}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <span className="text-muted-foreground">Average pace</span>
+              <span className="font-medium">{avgSecondsPerItem}s per item</span>
+            </div>
           </div>
 
           {/* Layer changes */}

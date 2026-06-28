@@ -12,9 +12,18 @@ export default function ActiveRecallLayout({
   children: React.ReactNode
 }) {
   const [isChatOpen, setIsChatOpen] = useState(false)
+  const [pendingPrompt, setPendingPrompt] = useState<{ id: string; text: string; autoSend?: boolean } | null>(null)
 
   // Listen for custom event to open chat from child components
-  const handleOpenChat = useCallback(() => {
+  const handleOpenChat = useCallback((event?: Event) => {
+    const detail = (event as CustomEvent<{ prompt?: string; autoSend?: boolean }> | undefined)?.detail
+    if (detail?.prompt) {
+      setPendingPrompt({
+        id: crypto.randomUUID(),
+        text: detail.prompt,
+        autoSend: detail.autoSend,
+      })
+    }
     setIsChatOpen(true)
   }, [])
 
@@ -50,6 +59,8 @@ export default function ActiveRecallLayout({
       <AIChatSidebar
         isOpen={isChatOpen}
         onToggle={() => setIsChatOpen((prev) => !prev)}
+        pendingPrompt={pendingPrompt}
+        onPendingPromptHandled={() => setPendingPrompt(null)}
       />
     </DashboardLayout>
   )

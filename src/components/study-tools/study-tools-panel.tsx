@@ -21,6 +21,7 @@ import { QuizOptions, QuizSet } from '@/types/quiz'
 import { MindMapOptions, MindMapSet } from '@/types/mindmap'
 import { StudyToolContent } from '@/lib/study-tools-store'
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Sparkles,
@@ -130,6 +131,142 @@ const iconMap = {
   'smart-summary': Zap,
   'quiz': BrainCircuit,
   'mind-map': Network
+}
+
+type StudyToolsSortMode = 'recent' | 'oldest' | 'title' | 'type'
+type StudyToolsGroupKey = 'all' | 'documents' | 'flashcards' | 'quizzes' | 'mindmaps'
+
+const getItemTime = (createdAt: string | Date | undefined): number => {
+  if (!createdAt) return 0
+  const value = createdAt instanceof Date ? createdAt : new Date(createdAt)
+  const time = value.getTime()
+  return Number.isFinite(time) ? time : 0
+}
+
+const compareBySortMode = <T extends { title: string; createdAt?: string | Date; type?: string }>(
+  sortMode: StudyToolsSortMode,
+) => (a: T, b: T) => {
+  if (sortMode === 'oldest') return getItemTime(a.createdAt) - getItemTime(b.createdAt)
+  if (sortMode === 'title') return a.title.localeCompare(b.title)
+  if (sortMode === 'type') {
+    const typeCompare = (a.type || '').localeCompare(b.type || '')
+    return typeCompare || (getItemTime(b.createdAt) - getItemTime(a.createdAt))
+  }
+  return getItemTime(b.createdAt) - getItemTime(a.createdAt)
+}
+
+interface StudyToolsLibraryContextValue {
+  sortMode: StudyToolsSortMode
+  setSortMode: (mode: StudyToolsSortMode) => void
+  collapsedGroups: Set<StudyToolsGroupKey>
+  toggleGroup: (group: StudyToolsGroupKey) => void
+}
+
+const StudyToolsLibraryContext = React.createContext<StudyToolsLibraryContextValue | null>(null)
+
+function useStudyToolsLibrary() {
+  const context = React.useContext(StudyToolsLibraryContext)
+  if (!context) {
+    throw new Error('useStudyToolsLibrary must be used inside StudyToolsLibraryContext.Provider')
+  }
+  return context
+}
+
+function useStudyToolsLibraryState(): StudyToolsLibraryContextValue {
+  const [sortMode, setSortMode] = React.useState<StudyToolsSortMode>('recent')
+  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<StudyToolsGroupKey>>(
+    () => new Set(['documents', 'flashcards', 'quizzes', 'mindmaps'])
+  )
+
+  const toggleGroup = React.useCallback((group: StudyToolsGroupKey) => {
+    setCollapsedGroups((current) => {
+      const next = new Set(current)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }, [])
+
+  return React.useMemo(() => ({
+    sortMode,
+    setSortMode,
+    collapsedGroups,
+    toggleGroup,
+  }), [collapsedGroups, sortMode, toggleGroup])
+}
+
+const SectionHeader: React.FC<{
+  group: StudyToolsGroupKey
+  icon: React.ReactNode
+  count: number
+  children: React.ReactNode
+}> = ({ group, icon, count, children }) => {
+  const { collapsedGroups, toggleGroup } = useStudyToolsLibrary()
+  const collapsed = collapsedGroups.has(group)
+
+  return (
+    <button
+      type="button"
+      onClick={() => toggleGroup(group)}
+      className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm font-medium text-foreground hover:bg-muted/60 transition-colors"
+    >
+      {collapsed ? <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+      {icon}
+      <span className="flex-1">{children}</span>
+      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{count}</span>
+    </button>
+  )
+}
+
+const StudyToolsLibraryControls: React.FC = () => {
+  const { sortMode, setSortMode, collapsedGroups, toggleGroup } = useStudyToolsLibrary()
+  const collapsibleGroups = ['all', 'documents', 'flashcards', 'quizzes', 'mindmaps'] as StudyToolsGroupKey[]
+  const allCollapsed = collapsibleGroups
+    .every((group) => collapsedGroups.has(group))
+
+  return (
+    <div className="rounded-xl border bg-muted/25 p-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold">Library</p>
+          <p className="text-[10px] text-muted-foreground">All materials, recent first</p>
+        </div>
+        <button
+          type="button"
+          className="text-[10px] font-medium text-primary hover:underline"
+          onClick={() => {
+            collapsibleGroups.forEach((group) => {
+              if (allCollapsed === collapsedGroups.has(group)) toggleGroup(group)
+            })
+          }}
+        >
+          {allCollapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      </div>
+      <div className="grid grid-cols-4 gap-1 rounded-lg bg-background/70 p-1">
+        {([
+          ['recent', 'Recent'],
+          ['oldest', 'Oldest'],
+          ['title', 'A-Z'],
+          ['type', 'Type'],
+        ] as Array<[StudyToolsSortMode, string]>).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setSortMode(mode)}
+            className={cn(
+              'rounded-md px-2 py-1 text-[10px] font-medium transition-colors',
+              sortMode === mode
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-muted'
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 interface StudyToolCardProps {
@@ -393,9 +530,14 @@ DocumentDropdownMenuComponent.displayName = 'DocumentDropdownMenuComponent'
 
 const GeneratedDocumentsSection: React.FC = React.memo(() => {
   const { generatedContent, openCanvas, removeGeneratedContent, renameGeneratedContent, copyToClipboard, downloadAsDOCX } = useStudyToolsStore()
+  const { sortMode, collapsedGroups } = useStudyToolsLibrary()
   const prefersReducedMotion = useReducedMotion()
   const [editingTitle, setEditingTitle] = React.useState<string | null>(null)
   const [editingValue, setEditingValue] = React.useState('')
+  const sortedContent = React.useMemo(
+    () => [...generatedContent].sort(compareBySortMode(sortMode)),
+    [generatedContent, sortMode]
+  )
 
   const handleRename = (content: StudyToolContent) => {
     setEditingTitle(content.id)
@@ -478,11 +620,11 @@ const GeneratedDocumentsSection: React.FC = React.memo(() => {
       transition={{ delay: 0.2, ...smoothTransition }}
       className="space-y-2 relative"
     >
-      <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-        <FileText className="w-4 h-4" />
-        Generated Documents ({generatedContent.length})
-      </h3>
+      <SectionHeader group="documents" icon={<FileText className="w-4 h-4" />} count={generatedContent.length}>
+        Documents
+      </SectionHeader>
 
+      {!collapsedGroups.has('documents') && (
       <motion.div
         className="space-y-2 relative"
         variants={{
@@ -496,7 +638,7 @@ const GeneratedDocumentsSection: React.FC = React.memo(() => {
         initial="hidden"
         animate="visible"
       >
-        {generatedContent.map((content, index) => {
+        {sortedContent.map((content, index) => {
           const tool = STUDY_TOOLS[content.type]
           const IconComponent = iconMap[content.type]
           const isGenerating = content.isGenerating
@@ -671,6 +813,7 @@ const GeneratedDocumentsSection: React.FC = React.memo(() => {
           )
         })}
       </motion.div>
+      )}
     </motion.div>
   )
 })
@@ -871,8 +1014,10 @@ const ExpandedPanel: React.FC<{
       console.error('DOCX download failed:', error)
     }
   }, [canvasContent, downloadAsDOCX])
+  const libraryState = useStudyToolsLibraryState()
 
   return (
+    <StudyToolsLibraryContext.Provider value={libraryState}>
     <motion.div
       variants={panelVariants}
       initial="collapsed"
@@ -930,14 +1075,17 @@ const ExpandedPanel: React.FC<{
 
       {/* Canvas Content or Tools Grid */}
       <AnimatePresence mode="wait">
-        {isCanvasOpen && canvasContent && !isCanvasFullscreen ? (
+        {isCanvasOpen && canvasContent ? (
           <motion.div
             key="canvas"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.05 } }}
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isCanvasFullscreen ? 'fixed inset-0 z-50' : 'flex-1'
+            )}
           >
             {/* Canvas Header */}
             <div className="flex items-center justify-between p-4 border-b border-border bg-gradient-to-r from-background/95 to-background/90 backdrop-blur-md relative z-10">
@@ -1236,38 +1384,44 @@ const ExpandedPanel: React.FC<{
               </div>
             </div>
           </motion.div>
-        ) : isViewerOpen && currentFlashcardSet && !isFullscreen ? (
+        ) : isViewerOpen && currentFlashcardSet ? (
           <motion.div
             key="flashcards"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.05 } }}
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isFullscreen ? 'fixed inset-0 z-50' : 'flex-1'
+            )}
           >
             <FlashcardViewer
               flashcards={currentFlashcardSet.cards}
               title={currentFlashcardSet.title}
               onClose={closeViewer}
-              isFullscreen={false}
+              isFullscreen={isFullscreen}
               onToggleFullscreen={toggleFullscreen}
               className="h-full"
             />
           </motion.div>
-        ) : isQuizViewerOpen && currentQuizSet && !isQuizFullscreen ? (
+        ) : isQuizViewerOpen && currentQuizSet ? (
           <motion.div
             key="quiz"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.05 } }}
             transition={{ type: 'spring', stiffness: 400, damping: 40 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isQuizFullscreen ? 'fixed inset-0 z-50' : 'flex-1'
+            )}
           >
             <QuizViewer
               questions={currentQuizSet.questions}
               title={currentQuizSet.title}
               onClose={closeQuizViewer}
-              isFullscreen={false}
+              isFullscreen={isQuizFullscreen}
               onToggleFullscreen={toggleQuizFullscreen}
               className="h-full"
             />
@@ -1330,6 +1484,9 @@ const ExpandedPanel: React.FC<{
               <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
             </motion.div>
 
+            <StudyToolsLibraryControls />
+            <AllStudyToolsSection />
+
             {/* Generated Documents Section */}
             <GeneratedDocumentsSection />
 
@@ -1346,6 +1503,7 @@ const ExpandedPanel: React.FC<{
         )}
       </AnimatePresence>
     </motion.div>
+    </StudyToolsLibraryContext.Provider>
   )
 }
 
@@ -1411,9 +1569,14 @@ FlashcardDropdownMenuComponent.displayName = 'FlashcardDropdownMenuComponent'
 
 const FlashcardSetsSection: React.FC = () => {
   const { flashcardSets, openViewer, removeFlashcardSet, renameFlashcardSet } = useFlashcardStore()
+  const { sortMode, collapsedGroups } = useStudyToolsLibrary()
   const prefersReducedMotion = useReducedMotion()
   const [editingTitle, setEditingTitle] = React.useState<string | null>(null)
   const [editingValue, setEditingValue] = React.useState('')
+  const sortedFlashcardSets = React.useMemo(
+    () => [...flashcardSets].sort(compareBySortMode(sortMode)),
+    [flashcardSets, sortMode]
+  )
 
   const handleStartRename = (flashcardSet: FlashcardSet) => {
     setEditingTitle(flashcardSet.id)
@@ -1457,11 +1620,11 @@ const FlashcardSetsSection: React.FC = () => {
       transition={{ delay: 0.25, ...smoothTransition }}
       className="space-y-2 mt-6 relative"
     >
-      <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-        <FlashcardsStackIcon size={18} className="text-brand-teal-600" />
-        Generated flashcards ({flashcardSets.length})
-      </h3>
+      <SectionHeader group="flashcards" icon={<FlashcardsStackIcon size={18} className="text-brand-teal-600" />} count={flashcardSets.length}>
+        Flashcards
+      </SectionHeader>
 
+      {!collapsedGroups.has('flashcards') && (
       <motion.div
         className="space-y-2 relative"
         variants={{
@@ -1475,7 +1638,7 @@ const FlashcardSetsSection: React.FC = () => {
         initial="hidden"
         animate="visible"
       >
-        {flashcardSets.map((flashcardSet, index) => {
+        {sortedFlashcardSets.map((flashcardSet, index) => {
           const isGenerating = flashcardSet.metadata?.isGenerating || false
           const generationProgress = flashcardSet.metadata?.generationProgress || 0
 
@@ -1628,6 +1791,7 @@ const FlashcardSetsSection: React.FC = () => {
           )
         })}
       </motion.div>
+      )}
     </motion.div>
   )
 }
@@ -1635,9 +1799,14 @@ const FlashcardSetsSection: React.FC = () => {
 // Quiz Sets Section Component
 const QuizSetsSection: React.FC = () => {
   const { quizSets, openViewer, removeQuizSet, renameQuizSet } = useQuizStore()
+  const { sortMode, collapsedGroups } = useStudyToolsLibrary()
   const prefersReducedMotion = useReducedMotion()
   const [editingTitle, setEditingTitle] = React.useState<string | null>(null)
   const [editingValue, setEditingValue] = React.useState('')
+  const sortedQuizSets = React.useMemo(
+    () => [...quizSets].sort(compareBySortMode(sortMode)),
+    [quizSets, sortMode]
+  )
 
   const handleStartRename = (quizSet: QuizSet) => {
     setEditingTitle(quizSet.id)
@@ -1675,11 +1844,11 @@ const QuizSetsSection: React.FC = () => {
       transition={{ delay: 0.3, ...smoothTransition }}
       className="space-y-2 mt-6 relative"
     >
-      <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-        <BrainCircuit size={18} className="text-rose-600 dark:text-rose-400" />
-        Generated quizzes ({quizSets.length})
-      </h3>
+      <SectionHeader group="quizzes" icon={<BrainCircuit size={18} className="text-rose-600 dark:text-rose-400" />} count={quizSets.length}>
+        Quizzes
+      </SectionHeader>
 
+      {!collapsedGroups.has('quizzes') && (
       <motion.div
         className="space-y-2 relative"
         variants={{
@@ -1693,7 +1862,7 @@ const QuizSetsSection: React.FC = () => {
         initial="hidden"
         animate="visible"
       >
-        {quizSets.map((quizSet, index) => {
+        {sortedQuizSets.map((quizSet, index) => {
           const isGenerating = quizSet.metadata?.isGenerating || false
           const generationProgress = quizSet.metadata?.generationProgress || 0
 
@@ -1866,6 +2035,111 @@ const QuizSetsSection: React.FC = () => {
           )
         })}
       </motion.div>
+      )}
+    </motion.div>
+  )
+}
+
+const AllStudyToolsSection: React.FC = () => {
+  const { generatedContent, openCanvas } = useStudyToolsStore()
+  const { flashcardSets, openViewer: openFlashcards } = useFlashcardStore()
+  const { quizSets, openViewer: openQuiz } = useQuizStore()
+  const { mindMapSets, openViewer: openMindMap } = useMindMapStore()
+  const { sortMode, collapsedGroups } = useStudyToolsLibrary()
+
+  const recentItems = React.useMemo(() => {
+    const items = [
+      ...generatedContent.map((content) => ({
+        id: content.id,
+        title: content.title,
+        type: content.type,
+        createdAt: content.createdAt,
+        count: `${Math.max(1, Math.round((content.content?.length || 0) / 1000))}k chars`,
+        isGenerating: !!content.isGenerating,
+        open: () => openCanvas(content),
+      })),
+      ...flashcardSets.map((set) => ({
+        id: set.id,
+        title: set.title,
+        type: 'flashcards' as StudyToolType,
+        createdAt: set.createdAt,
+        count: `${set.cards.length} cards`,
+        isGenerating: !!set.metadata?.isGenerating,
+        open: () => openFlashcards(set),
+      })),
+      ...quizSets.map((set) => ({
+        id: set.id,
+        title: set.title,
+        type: 'quiz' as StudyToolType,
+        createdAt: set.createdAt,
+        count: `${set.questions.length} questions`,
+        isGenerating: !!set.metadata?.isGenerating,
+        open: () => openQuiz(set),
+      })),
+      ...mindMapSets.map((set) => ({
+        id: set.id,
+        title: set.title,
+        type: 'mind-map' as StudyToolType,
+        createdAt: set.createdAt,
+        count: `${set.mindMapData?.metadata?.totalNodes || 0} nodes`,
+        isGenerating: !!set.metadata?.isGenerating,
+        open: () => openMindMap(set),
+      })),
+    ]
+
+    return items.sort(compareBySortMode(sortMode))
+  }, [flashcardSets, generatedContent, mindMapSets, openCanvas, openFlashcards, openMindMap, openQuiz, quizSets, sortMode])
+
+  if (recentItems.length === 0) return null
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.15, ...smoothTransition }}
+      className="space-y-2 relative"
+    >
+      <SectionHeader group="all" icon={<Clock className="w-4 h-4 text-primary" />} count={recentItems.length}>
+        All
+      </SectionHeader>
+
+      {!collapsedGroups.has('all') && (
+        <div className="grid grid-cols-1 gap-2">
+          {recentItems.map((item) => {
+            const tool = STUDY_TOOLS[item.type]
+            const Icon = iconMap[item.type]
+
+            return (
+              <button
+                key={`${item.type}-${item.id}`}
+                type="button"
+                disabled={item.isGenerating}
+                onClick={item.open}
+                className={cn(
+                  'group flex items-center gap-3 rounded-lg border bg-background/70 p-2.5 text-left transition-all hover:bg-background hover:shadow-sm disabled:cursor-default disabled:opacity-70',
+                  tool.borderColor
+                )}
+              >
+                <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', tool.color)}>
+                  {item.isGenerating ? (
+                    <Loader2 className={cn('h-4 w-4 animate-spin', tool.textColor)} />
+                  ) : (
+                    <Icon className={cn('h-4 w-4', tool.textColor)} />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-medium">{item.title}</span>
+                  <span className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <span>{STUDY_TOOLS[item.type].name}</span>
+                    <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                    <span>{item.count}</span>
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </motion.div>
   )
 }
@@ -1875,7 +2149,7 @@ const EmbeddedStudyToolsContent: React.FC<{
   onGenerateStudyTool: (type: StudyToolType) => void
   hasContext: boolean
   onClose?: () => void
-}> = ({ onGenerateStudyTool, hasContext, onClose }) => {
+}> = ({ onGenerateStudyTool, hasContext }) => {
   const {
     isCanvasOpen,
     isCanvasFullscreen,
@@ -1895,7 +2169,6 @@ const EmbeddedStudyToolsContent: React.FC<{
   const { isViewerOpen: isQuizViewerOpen, currentQuizSet, isFullscreen: isQuizFullscreen, closeViewer: closeQuizViewer, toggleFullscreen: toggleQuizFullscreen } = useQuizStore()
   const { isViewerOpen: isMindMapViewerOpen, currentMindMapSet, isFullscreen: isMindMapFullscreen, closeViewer: closeMindMapViewer, toggleFullscreen: toggleMindMapFullscreen } = useMindMapStore()
   const [isCopied, setIsCopied] = React.useState(false)
-  const prefersReducedMotion = useReducedMotion()
 
   const handleErrorAction = React.useCallback((action: ErrorAction) => {
     switch (action.intent) {
@@ -1938,21 +2211,26 @@ const EmbeddedStudyToolsContent: React.FC<{
     if (!canvasContent) return
     try { await downloadAsDOCX(canvasContent) } catch { /* ignore */ }
   }, [canvasContent, downloadAsDOCX])
+  const libraryState = useStudyToolsLibraryState()
 
   return (
+    <StudyToolsLibraryContext.Provider value={libraryState}>
     <div className="h-full flex flex-col">
       {friendlyError && (
         <ActionableErrorPanel error={friendlyError} onAction={handleErrorAction} />
       )}
 
       <AnimatePresence mode="wait">
-        {isCanvasOpen && canvasContent && !isCanvasFullscreen ? (
+        {isCanvasOpen && canvasContent ? (
           <motion.div
             key="canvas"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isCanvasFullscreen ? 'fixed inset-0 z-50' : 'flex-1'
+            )}
           >
             {/* Canvas Header */}
             <div className="flex items-center justify-between p-3 border-b border-border">
@@ -2013,36 +2291,42 @@ const EmbeddedStudyToolsContent: React.FC<{
               </div>
             </div>
           </motion.div>
-        ) : isViewerOpen && currentFlashcardSet && !isFullscreen ? (
+        ) : isViewerOpen && currentFlashcardSet ? (
           <motion.div
             key="flashcards"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isFullscreen ? 'fixed inset-0 z-50' : 'flex-1'
+            )}
           >
             <FlashcardViewer
               flashcards={currentFlashcardSet.cards}
               title={currentFlashcardSet.title}
               onClose={closeViewer}
-              isFullscreen={false}
+              isFullscreen={isFullscreen}
               onToggleFullscreen={toggleFullscreen}
               className="h-full"
             />
           </motion.div>
-        ) : isQuizViewerOpen && currentQuizSet && !isQuizFullscreen ? (
+        ) : isQuizViewerOpen && currentQuizSet ? (
           <motion.div
             key="quiz"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col min-h-0"
+            className={cn(
+              'flex flex-col min-h-0 bg-background',
+              isQuizFullscreen ? 'fixed inset-0 z-50' : 'flex-1'
+            )}
           >
             <QuizViewer
               questions={currentQuizSet.questions}
               title={currentQuizSet.title}
               onClose={closeQuizViewer}
-              isFullscreen={false}
+              isFullscreen={isQuizFullscreen}
               onToggleFullscreen={toggleQuizFullscreen}
               className="h-full"
             />
@@ -2097,6 +2381,8 @@ const EmbeddedStudyToolsContent: React.FC<{
               <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" />
             </div>
 
+            <StudyToolsLibraryControls />
+            <AllStudyToolsSection />
             <GeneratedDocumentsSection />
             <FlashcardSetsSection />
             <QuizSetsSection />
@@ -2106,15 +2392,20 @@ const EmbeddedStudyToolsContent: React.FC<{
         )}
       </AnimatePresence>
     </div>
+    </StudyToolsLibraryContext.Provider>
   )
 }
 
 // Mind Map Sets Section
 const MindMapSetsSection: React.FC = () => {
   const { mindMapSets, openViewer, removeMindMapSet, renameMindMapSet } = useMindMapStore()
-  const prefersReducedMotion = useReducedMotion()
+  const { sortMode, collapsedGroups } = useStudyToolsLibrary()
   const [editingTitle, setEditingTitle] = React.useState<string | null>(null)
   const [editingValue, setEditingValue] = React.useState('')
+  const sortedMindMapSets = React.useMemo(
+    () => [...mindMapSets].sort(compareBySortMode(sortMode)),
+    [mindMapSets, sortMode]
+  )
 
   const handleStartRename = (set: MindMapSet) => {
     setEditingTitle(set.id)
@@ -2142,18 +2433,18 @@ const MindMapSetsSection: React.FC = () => {
       transition={{ delay: 0.3, ...smoothTransition }}
       className="space-y-2 mt-6 relative"
     >
-      <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-        <Network className="w-4 h-4 text-teal-600" />
-        Mind Maps ({mindMapSets.length})
-      </h3>
+      <SectionHeader group="mindmaps" icon={<Network className="w-4 h-4 text-teal-600" />} count={mindMapSets.length}>
+        Mind Maps
+      </SectionHeader>
 
+      {!collapsedGroups.has('mindmaps') && (
       <motion.div
         className="space-y-2 relative"
         variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.05 } } }}
         initial="hidden"
         animate="visible"
       >
-        {mindMapSets.map((set, index) => {
+        {sortedMindMapSets.map((set, index) => {
           const isGenerating = set.metadata?.isGenerating || false
           const generationProgress = set.metadata?.generationProgress || 0
 
@@ -2288,6 +2579,7 @@ const MindMapSetsSection: React.FC = () => {
           )
         })}
       </motion.div>
+      )}
     </motion.div>
   )
 }

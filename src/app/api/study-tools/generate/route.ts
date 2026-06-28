@@ -406,6 +406,12 @@ async function syncGeneratedPlanActivity(params: {
   const { userId, planId, planDay, activityIndex, outputId, type, documentId, flashcardData, quizData } = params
   if (!planId || typeof planDay !== 'number' || typeof activityIndex !== 'number' || !outputId) return null
 
+  const generatedSourceType =
+    type === 'quiz' ? 'quiz_set' :
+    type === 'flashcards' ? 'flashcard_set' :
+    type === 'mind-map' ? 'mindmap_set' :
+    'output'
+
   const cards = type === 'flashcards' && flashcardData?.length
     ? flashcardData.map((card) => ({
         sourceType: 'flashcard',
@@ -430,56 +436,62 @@ async function syncGeneratedPlanActivity(params: {
         }))
       : []
 
-  if (cards.length === 0) return null
-
-  const sourceIds = cards.map((card) => card.sourceId)
-  const sourceType = type === 'quiz' ? 'quiz' : 'flashcard'
-  const { data: existingCards, error: existingFetchError } = await serviceSupabase
-    .from('review_cards')
-    .select('source_id')
-    .eq('user_id', userId)
-    .eq('source_type', sourceType)
-    .in('source_id', sourceIds)
-
-  if (existingFetchError) {
-    throw new Error('Generated cards could not be checked for existing review state')
-  }
-
-  const existingIds = new Set((existingCards || []).map((card) => card.source_id))
-  const newCards = cards.filter((card) => !existingIds.has(card.sourceId))
+  let sourceType: 'flashcard' | 'quiz' | null = null
   let synced = 0
-  for (const card of newCards) {
-    const { error } = await serviceSupabase
+  let existing = 0
+  let total = 0
+
+  if (cards.length > 0) {
+    const sourceIds = cards.map((card) => card.sourceId)
+    sourceType = type === 'quiz' ? 'quiz' : 'flashcard'
+    const { data: existingCards, error: existingFetchError } = await serviceSupabase
       .from('review_cards')
-      .insert({
-        user_id: userId,
-        source_type: card.sourceType,
-        source_id: card.sourceId,
-        source_set_id: outputId,
-        document_id: documentId || null,
-        plan_id: planId,
-        question: card.question,
-        answer: card.answer,
-        options: card.options,
-        correct_answer: card.correctAnswer,
-        topic: card.topic,
-        difficulty: card.difficulty,
-      })
-    if (!error) synced++
+      .select('source_id')
+      .eq('user_id', userId)
+      .eq('source_type', sourceType)
+      .in('source_id', sourceIds)
+
+    if (existingFetchError) {
+      throw new Error('Generated cards could not be checked for existing review state')
+    }
+
+    const existingIds = new Set((existingCards || []).map((card) => card.source_id))
+    existing = existingIds.size
+    const newCards = cards.filter((card) => !existingIds.has(card.sourceId))
+    for (const card of newCards) {
+      const { error } = await serviceSupabase
+        .from('review_cards')
+        .insert({
+          user_id: userId,
+          source_type: card.sourceType,
+          source_id: card.sourceId,
+          source_set_id: outputId,
+          document_id: documentId || null,
+          plan_id: planId,
+          question: card.question,
+          answer: card.answer,
+          options: card.options,
+          correct_answer: card.correctAnswer,
+          topic: card.topic,
+          difficulty: card.difficulty,
+        })
+      if (!error) synced++
+    }
+
+    await serviceSupabase
+      .from('review_cards')
+      .update({ plan_id: planId })
+      .eq('user_id', userId)
+      .eq('source_set_id', outputId)
+
+    const { count } = await serviceSupabase
+      .from('review_cards')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('plan_id', planId)
+      .eq('source_set_id', outputId)
+    total = count || cards.length
   }
-
-  await serviceSupabase
-    .from('review_cards')
-    .update({ plan_id: planId })
-    .eq('user_id', userId)
-    .eq('source_set_id', outputId)
-
-  const { count } = await serviceSupabase
-    .from('review_cards')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('plan_id', planId)
-    .eq('source_set_id', outputId)
 
   const { data: plan, error: planError } = await serviceSupabase
     .from('agent_study_plans')
@@ -497,8 +509,8 @@ async function syncGeneratedPlanActivity(params: {
 
   activity.generationStatus = 'ready'
   activity.generatedSourceId = outputId
-  activity.generatedSourceType = type === 'quiz' ? 'quiz_set' : 'flashcard_set'
-  activity.cardCount = count || cards.length
+  activity.generatedSourceType = generatedSourceType
+  if (cards.length > 0) activity.cardCount = total || cards.length
 
   const { error: updateError } = await serviceSupabase
     .from('agent_study_plans')
@@ -509,10 +521,10 @@ async function syncGeneratedPlanActivity(params: {
   if (updateError) throw new Error('Generated cards synced, but plan activity update failed')
 
   return {
-    sourceType,
+    sourceType: sourceType || generatedSourceType,
     synced,
-    existing: existingIds.size,
-    total: count || cards.length,
+    existing,
+    total,
   }
 }
 

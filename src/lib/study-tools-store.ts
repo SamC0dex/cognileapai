@@ -189,7 +189,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
   openCanvas: async (content: StudyToolContent) => {
     console.log('[StudyToolsStore] Opening canvas with content:', content)
 
-    // Close flashcard viewer when opening canvas (mutual exclusion)
+    // Close native viewers when opening document canvas (mutual exclusion)
     try {
       const { useFlashcardStore } = await import('@/lib/flashcard-store')
       const flashcardStore = useFlashcardStore.getState()
@@ -198,6 +198,26 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
       }
     } catch (error) {
       console.warn('[StudyToolsStore] Could not close flashcard viewer:', error)
+    }
+
+    try {
+      const { useQuizStore } = await import('@/lib/quiz-store')
+      const quizStore = useQuizStore.getState()
+      if (quizStore.isViewerOpen) {
+        quizStore.closeViewer()
+      }
+    } catch (error) {
+      console.warn('[StudyToolsStore] Could not close quiz viewer:', error)
+    }
+
+    try {
+      const { useMindMapStore } = await import('@/lib/mindmap-store')
+      const mindMapStore = useMindMapStore.getState()
+      if (mindMapStore.isViewerOpen) {
+        mindMapStore.closeViewer()
+      }
+    } catch (error) {
+      console.warn('[StudyToolsStore] Could not close mind map viewer:', error)
     }
 
     set({ canvasContent: content, isCanvasOpen: true })

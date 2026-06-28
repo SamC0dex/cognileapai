@@ -414,7 +414,17 @@ export interface PlanAdaptationContext {
       generatedSourceId?: string | null
       completionStatus?: string
       notes: string
+      schedulerReason?: string
+      schedulerBucket?: 'learn' | 'practice' | 'remember'
+      schedulerWeight?: number
+      expectedOutcome?: string
     }>
+  }>
+  activitySessionSummary?: Array<{
+    activityType: string
+    topic: string | null
+    durationMs: number | null
+    status: string
   }>
   topicPerformance: Array<{
     topic: string
@@ -438,13 +448,14 @@ Rules:
 - If overall accuracy is low (< 50%), simplify: more summaries/study guides/flashcards, fewer quizzes
 - If overall accuracy is high (> 85%), intensify: more quizzes and review_due_cards, add variety
 - Keep daily card totals between 15-50
+- Do not force the same number of activities every day; use the student's remaining time budget and performance pressure. Light days can have 1-2 activities, intensive days can have 4-6.
 - Preserve the progressive learning model: Learn -> Practice -> Remember
 - activity type must be one of: study_guide, summary, smart_notes, mindmap, flashcards, quiz, review_due_cards
-- Every activity must include: type, documentId, topic, plannedMinutes, generationStatus, generatedSourceId, completionStatus, notes
+- Every activity must include: type, documentId, topic, plannedMinutes, generationStatus, generatedSourceId, completionStatus, notes, schedulerReason, schedulerBucket, schedulerWeight, expectedOutcome
 - Return ONLY a valid JSON array of the adjusted remaining schedule days
 - Use cardCount only for flashcards, quiz, and review_due_cards
 - Do not invent generatedSourceId values; preserve existing values where present and otherwise use null
-- Each day: { "day": N, "date": "YYYY-MM-DD", "activities": [{ "type": "...", "documentId": "...", "topic": "...", "plannedMinutes": N, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "..." }] }`
+- Each day: { "day": N, "date": "YYYY-MM-DD", "activities": [{ "type": "...", "documentId": "...", "topic": "...", "plannedMinutes": N, "generationStatus": "not_generated", "generatedSourceId": null, "completionStatus": "not_started", "notes": "...", "schedulerReason": "why this activity belongs here", "schedulerBucket": "learn|practice|remember", "schedulerWeight": 0.8, "expectedOutcome": "what completion should prove" }] }`
 
   const topicData = ctx.topicPerformance.map((t) =>
     `- ${t.topic}: accuracy=${t.accuracy}%, reviews=${t.totalReviews}, avgTime=${t.avgResponseTimeMs}ms, cards=${t.cardCount}`
@@ -452,6 +463,10 @@ Rules:
 
   const schedulePreview = ctx.remainingSchedule.slice(0, 5).map((d) =>
     `  Day ${d.day} (${d.date}): ${d.activities.map((a) => `${a.type}:${a.topic}(${a.cardCount ?? a.plannedMinutes ?? 0})`).join(', ')}`
+  ).join('\n')
+
+  const sessionData = (ctx.activitySessionSummary || []).map((session) =>
+    `- ${session.activityType}:${session.topic || 'Untitled'} status=${session.status}, time=${Math.round((session.durationMs || 0) / 60000)}m`
   ).join('\n')
 
   const userContent = `Adapt this study plan based on performance and the user's request.
@@ -465,6 +480,9 @@ Strong topics: ${ctx.strongTopics.join(', ') || 'none'}
 
 Per-topic performance:
 ${topicData}
+
+Recent non-card activity sessions:
+${sessionData || 'No tracked non-card sessions yet.'}
 
 Current remaining schedule (first 5 days):
 ${schedulePreview}

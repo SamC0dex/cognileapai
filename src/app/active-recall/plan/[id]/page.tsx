@@ -29,6 +29,7 @@ import {
   ScrollText,
   RotateCcw,
   AlertCircle,
+  Sparkles,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -46,6 +47,7 @@ import type { PlanActivity, PlanScheduleDay } from '@/types/active-recall'
 import type { FlashcardEntry } from '@/types/flashcards'
 import type { QuizQuestionEntry } from '@/types/quiz'
 import type { MindMapData } from '@/types/mindmap'
+import { useStudyToolsStore } from '@/lib/study-tools-store'
 
 interface PlanDetail {
   id: string
@@ -66,9 +68,33 @@ interface PlanStats {
   dueCards: number
   cardsByType: Record<string, number>
   cardsByLayer: Record<string, number>
+  activitySessions?: PlanActivitySession[]
+  totalActivityTimeMs?: number
 }
 
 type StudyToolGenerateType = 'study-guide' | 'smart-summary' | 'smart-notes' | 'flashcards' | 'quiz' | 'mind-map'
+
+interface ActivityCompletionSummary {
+  key: string
+  title: string
+  typeLabel: string
+  primaryMetric: string
+  secondaryMetric: string
+  timeSpent: string
+}
+
+interface PlanActivitySession {
+  id: string
+  plan_day: number
+  activity_index: number
+  activity_type: string
+  topic: string | null
+  status: 'in_progress' | 'completed' | 'abandoned'
+  started_at: string
+  completed_at: string | null
+  duration_ms: number | null
+  result_metrics?: Record<string, unknown>
+}
 
 interface GeneratedStudyToolResponse {
   success: boolean
@@ -267,10 +293,14 @@ function getActivityState(activity: PlanActivity) {
   }
 
   if (activity.generationStatus === 'not_generated') {
+    return null
+  }
+
+  if (activity.completionStatus === 'in_progress') {
     return {
-      label: 'Needs material',
-      className: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
-      icon: <AlertCircle className="h-3 w-3" />,
+      label: 'In progress',
+      className: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+      icon: <Clock className="h-3 w-3" />,
     }
   }
 
@@ -297,9 +327,62 @@ function getActivityState(activity: PlanActivity) {
   }
 }
 
+function activityKey(day: number, activityIndex: number) {
+  return `${day}:${activityIndex}`
+}
+
+function formatDuration(ms: number) {
+  if (!Number.isFinite(ms) || ms <= 0) return 'Under 1 min'
+  const minutes = Math.max(1, Math.round(ms / 60000))
+  if (minutes < 60) return `${minutes} min`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`
+}
+
+function buildCompletionSummary(
+  activity: PlanActivity,
+  day: number,
+  activityIndex: number,
+  elapsedMs: number,
+): ActivityCompletionSummary {
+  const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.flashcard_review
+  const plannedCount = activity.cardCount ?? activity.plannedMinutes ?? 0
+  const unit = activityUnit(activity.type, plannedCount)
+  const generatedCount = activity.reviewedCount && activity.reviewedCount > 0
+    ? activity.reviewedCount
+    : plannedCount
+
+  const primaryMetric = activity.type === 'quiz'
+    ? `${generatedCount} questions available`
+    : activity.type === 'mindmap' || activity.type === 'mindmap_review'
+      ? `${generatedCount} nodes reviewed`
+      : activity.type === 'flashcard_review'
+        ? `${generatedCount} cards reviewed`
+        : `${generatedCount} ${unit}`
+
+  return {
+    key: `${activityKey(day, activityIndex)}:${Date.now()}`,
+    title: activity.topic,
+    typeLabel: config.label,
+    primaryMetric,
+    secondaryMetric: activity.generatedSourceId
+      ? `Opened ${config.label} material`
+      : 'Completed from today\'s plan',
+    timeSpent: formatDuration(elapsedMs),
+  }
+}
+
+function trackedTimeLabel(activity: PlanActivity) {
+  if (activity.totalTimeMs && activity.totalTimeMs > 0) return `Tracked ${formatDuration(activity.totalTimeMs)}`
+  if (activity.startedAt && activity.completionStatus === 'in_progress') return 'Timer running'
+  return null
+}
+
 export default function PlanDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
+  const { generatedContent, loadStudyToolsFromDatabase, openCanvas, enqueueAutoOpen } = useStudyToolsStore()
   const [plan, setPlan] = useState<PlanDetail | null>(null)
   const [stats, setStats] = useState<PlanStats | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -311,6 +394,9 @@ export default function PlanDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [activityStartedAt, setActivityStartedAt] = useState<Record<string, number>>({})
+  const [activitySessionIds, setActivitySessionIds] = useState<Record<string, string>>({})
+  const [completionSummary, setCompletionSummary] = useState<ActivityCompletionSummary | null>(null)
 
   // Expanded days
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set())
@@ -425,6 +511,175 @@ export default function PlanDetailPage() {
     } catch {
       // Revert on failure
       fetchPlan()
+    }
+  }
+
+  const patchActivityCompletion = async (
+    day: number,
+    activityIndex: number,
+    completionStatus: PlanActivity['completionStatus'],
+    options?: { sessionId?: string | null; durationMs?: number },
+  ) => {
+    setPlan((current) => {
+      if (!current) return current
+      let completedDelta = 0
+      const schedule = current.schedule.map((scheduleDay) => {
+        if (scheduleDay.day !== day) return scheduleDay
+        const activities = scheduleDay.activities.map((entry, index) => {
+          if (index !== activityIndex) return entry
+          const wasCompleted = isActivityComplete(entry)
+          const isCompleted = completionStatus === 'completed'
+          completedDelta = wasCompleted === isCompleted ? 0 : isCompleted ? 1 : -1
+          return {
+            ...entry,
+            completed: isCompleted,
+            completionStatus,
+          }
+        })
+        return { ...scheduleDay, activities, isCompleted: activities.every(isActivityComplete) }
+      })
+      return {
+        ...current,
+        schedule,
+        completed_activities: Math.max(0, (current.completed_activities || 0) + completedDelta),
+      }
+    })
+
+    const response = await fetch(`/api/active-recall/agent/plans/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'set_activity_completion',
+        day,
+        activityIndex,
+        completionStatus,
+        sessionId: options?.sessionId,
+        durationMs: options?.durationMs,
+      }),
+    })
+
+    if (!response.ok) {
+      fetchPlan()
+      throw new Error('Failed to update reading progress')
+    }
+  }
+
+  const handleOpenStudyActivity = async (day: number, activityIndex: number) => {
+    if (!plan) return
+    const dayEntry = plan.schedule.find((entry) => entry.day === day)
+    const activity = dayEntry?.activities[activityIndex]
+    if (!activity) return
+
+    try {
+      const key = activityKey(day, activityIndex)
+      const startedAt = Date.now()
+      setActivityStartedAt((current) => current[key] ? current : { ...current, [key]: startedAt })
+      if (!activitySessionIds[key] && !isActivityComplete(activity)) {
+        try {
+          const sessionRes = await fetch(`/api/active-recall/agent/plans/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'start_activity_session', day, activityIndex }),
+          })
+          if (sessionRes.ok) {
+            const sessionData = await sessionRes.json()
+            const sessionId = sessionData?.session?.id
+            const startedAtIso = sessionData?.session?.started_at
+            if (sessionId) {
+              setActivitySessionIds((current) => ({ ...current, [key]: sessionId }))
+            }
+            if (startedAtIso) {
+              const serverStartedAt = new Date(startedAtIso).getTime()
+              if (Number.isFinite(serverStartedAt)) {
+                setActivityStartedAt((current) => ({ ...current, [key]: serverStartedAt }))
+              }
+            }
+          }
+        } catch {
+          // Session tracking is additive; opening material should still work if telemetry is unavailable.
+        }
+      }
+      if (activity.documentId) {
+        await loadStudyToolsFromDatabase(activity.documentId)
+      }
+      if (!isActivityComplete(activity) && activity.completionStatus !== 'in_progress') {
+        await patchActivityCompletion(day, activityIndex, 'in_progress')
+      }
+      window.dispatchEvent(new Event('expand-study-tools-panel'))
+
+      const toolType = studyToolTypeForActivity(activity.type)
+      if (toolType === 'quiz' || toolType === 'mind-map' || toolType === 'flashcards') {
+        if (!activity.generatedSourceId) {
+          throw new Error('The generated study material is not available yet.')
+        }
+        enqueueAutoOpen(activity.generatedSourceId, toolType)
+        return
+      }
+
+      const output = useStudyToolsStore.getState().generatedContent.find((tool) => tool.id === activity.generatedSourceId)
+        || generatedContent.find((tool) => tool.id === activity.generatedSourceId)
+      if (!output) {
+        throw new Error('The generated study material is not available yet.')
+      }
+
+      await openCanvas(output)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not open the study material.')
+    }
+  }
+
+  const continueFromActivity = async (day: number, activityIndex: number) => {
+    const dayEntry = plan?.schedule.find((entry) => entry.day === day)
+    const nextIndex = dayEntry?.activities.findIndex((activity, index) =>
+      index > activityIndex && !isActivityComplete(activity)
+    ) ?? -1
+    const nextActivity = nextIndex >= 0 ? dayEntry?.activities[nextIndex] : null
+
+    if (!dayEntry || !nextActivity) return
+
+    if (isGenerationNeeded(nextActivity)) {
+      await handleGenerateActivity(dayEntry.day, nextIndex)
+      return
+    }
+
+    if (nextActivity.generatedSourceId) {
+      await handleOpenStudyActivity(dayEntry.day, nextIndex)
+      return
+    }
+
+    if (nextActivity.type === 'review_due_cards') {
+      handleStartSession()
+    }
+  }
+
+  const handleCompleteStudyActivity = async (day: number, activityIndex: number, advance = false) => {
+    try {
+      const dayEntry = plan?.schedule.find((entry) => entry.day === day)
+      const activity = dayEntry?.activities[activityIndex]
+      const key = activityKey(day, activityIndex)
+      const startedAt = activityStartedAt[key] ?? Date.now()
+      const durationMs = Date.now() - startedAt
+      const sessionId = activitySessionIds[key] || activity?.lastSessionId || null
+      await patchActivityCompletion(day, activityIndex, 'completed', { sessionId, durationMs })
+      if (activity) {
+        setCompletionSummary(buildCompletionSummary(activity, day, activityIndex, durationMs))
+      }
+      setActivityStartedAt((current) => {
+        const next = { ...current }
+        delete next[key]
+        return next
+      })
+      setActivitySessionIds((current) => {
+        const next = { ...current }
+        delete next[key]
+        return next
+      })
+      toast.success('Reading marked complete.')
+      if (advance) {
+        await continueFromActivity(day, activityIndex)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to mark reading complete.')
     }
   }
 
@@ -602,6 +857,28 @@ export default function PlanDetailPage() {
     router.push(url)
   }
 
+  const handleContinuePlan = async () => {
+    if (!todayDay || !nextTodayActivity || nextTodayActivityIndex < 0) {
+      handleStartSession()
+      return
+    }
+
+    const activity = nextTodayActivity
+    if (isGenerationNeeded(activity)) {
+      await handleGenerateActivity(todayDay.day, nextTodayActivityIndex)
+      return
+    }
+
+    if (activity.generatedSourceId) {
+      await handleOpenStudyActivity(todayDay.day, nextTodayActivityIndex)
+      return
+    }
+
+    if (activity.type === 'review_due_cards') {
+      handleStartSession()
+    }
+  }
+
   const toggleDay = (day: number) => {
     setExpandedDays(prev => {
       const next = new Set(prev)
@@ -636,8 +913,12 @@ export default function PlanDetailPage() {
   const displayDay = Math.min(plan.currentDay, plan.totalDays || plan.currentDay)
   const daysRemaining = Math.max(0, plan.totalDays - displayDay)
   const todayDay = plan.schedule.find((day) => day.day === displayDay) || null
-  const todayIncomplete = todayDay?.activities.filter((activity) => !isActivityComplete(activity)) || []
-  const nextTodayActivity = todayIncomplete[0] || null
+  const nextTodayActivityIndex = todayDay?.activities.findIndex((activity) => !isActivityComplete(activity)) ?? -1
+  const nextTodayActivity = nextTodayActivityIndex >= 0 ? todayDay?.activities[nextTodayActivityIndex] ?? null : null
+  const canContinuePlan = !!nextTodayActivity || (stats?.dueCards || 0) > 0
+  const trackedStudyMinutes = stats?.totalActivityTimeMs
+    ? Math.max(1, Math.round(stats.totalActivityTimeMs / 60000))
+    : 0
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -762,18 +1043,20 @@ export default function PlanDetailPage() {
               </p>
             )}
           </div>
-          {(stats?.dueCards || 0) > 0 && (
+          {canContinuePlan && (
             <Button
-              onClick={() => handleStartSession()}
+              onClick={() => { void handleContinuePlan() }}
               variant="purple"
               size="sm"
               className="gap-2"
             >
               <Play className="h-3.5 w-3.5" />
-              Start Review
-              <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-[10px]">
-                {stats?.dueCards}
-              </span>
+              {nextTodayActivity ? 'Continue Plan' : 'Start Review'}
+              {!nextTodayActivity && (stats?.dueCards || 0) > 0 ? (
+                <span className="bg-white/20 px-1.5 py-0.5 rounded-full text-[10px]">
+                  {stats?.dueCards}
+                </span>
+              ) : null}
             </Button>
           )}
         </div>
@@ -784,10 +1067,10 @@ export default function PlanDetailPage() {
               <ActivityRow
                 key={idx}
                 activity={activity}
-                isToday
                 onComplete={() => handleToggleActivity(todayDay.day, idx)}
+                onCompleteStudy={() => handleCompleteStudyActivity(todayDay.day, idx, true)}
                 onGenerate={() => handleGenerateActivity(todayDay.day, idx)}
-                onReview={() => handleStartSession(ACTIVITY_CONFIG[activity.type]?.reviewType, true)}
+                onStudy={() => handleOpenStudyActivity(todayDay.day, idx)}
               />
             ))}
           </div>
@@ -797,6 +1080,15 @@ export default function PlanDetailPage() {
           </div>
         )}
       </div>
+
+      <AnimatePresence>
+        {completionSummary ? (
+          <ActivityCompletionCard
+            summary={completionSummary}
+            onDismiss={() => setCompletionSummary(null)}
+          />
+        ) : null}
+      </AnimatePresence>
 
       {/* Progress + Stats Bar */}
       <div className="rounded-xl border bg-card p-5 space-y-4">
@@ -816,25 +1108,27 @@ export default function PlanDetailPage() {
         {/* Stats row */}
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard icon={<BarChart3 className="h-4 w-4" />} label="Total Items" value={stats.totalCards} />
+            <StatCard icon={<BarChart3 className="h-4 w-4" />} label="Generated Items" value={stats.totalCards} />
             <StatCard icon={<Target className="h-4 w-4" />} label="Due Now" value={stats.dueCards} accent />
-            <StatCard icon={<FileText className="h-4 w-4 text-blue-500" />} label="Flashcards" value={stats.cardsByType?.flashcard || 0} />
-            <StatCard icon={<FlaskConical className="h-4 w-4 text-violet-500" />} label="Questions" value={stats.cardsByType?.quiz || 0} />
+            <StatCard icon={<FileText className="h-4 w-4 text-blue-500" />} label="Generated Flashcards" value={stats.cardsByType?.flashcard || 0} />
+            <StatCard icon={<Clock className="h-4 w-4 text-violet-500" />} label="Tracked Study" value={trackedStudyMinutes} suffix="m" />
           </div>
         )}
 
         {/* Start Session CTA */}
-        {(stats?.dueCards || 0) > 0 && (
+        {canContinuePlan && (
           <Button
-            onClick={() => handleStartSession()}
+            onClick={() => { void handleContinuePlan() }}
             variant="purple"
             className="w-full gap-2"
           >
             <Play className="h-4 w-4" />
-            Start Review Session
-            <span className="ml-1 bg-white/20 px-2 py-0.5 rounded-full text-xs">
-              {stats?.dueCards} due
-            </span>
+            {nextTodayActivity ? 'Continue Today\'s Plan' : 'Start Review Session'}
+            {!nextTodayActivity && (stats?.dueCards || 0) > 0 ? (
+              <span className="ml-1 bg-white/20 px-2 py-0.5 rounded-full text-xs">
+                {stats?.dueCards} due
+              </span>
+            ) : null}
           </Button>
         )}
       </div>
@@ -853,7 +1147,6 @@ export default function PlanDetailPage() {
             const isExpanded = expandedDays.has(day.day)
             const completedCount = day.activities.filter(isActivityComplete).length
             const totalCount = day.activities.length
-
             return (
               <div
                 key={day.day}
@@ -934,23 +1227,23 @@ export default function PlanDetailPage() {
                           <ActivityRow
                             key={idx}
                             activity={activity}
-                            isToday={isToday}
                             onComplete={() => handleToggleActivity(day.day, idx)}
+                            onCompleteStudy={() => handleCompleteStudyActivity(day.day, idx, isToday)}
                             onGenerate={() => handleGenerateActivity(day.day, idx)}
-                            onReview={() => handleStartSession(ACTIVITY_CONFIG[activity.type]?.reviewType, true)}
+                            onStudy={() => handleOpenStudyActivity(day.day, idx)}
                           />
                         ))}
 
                         {/* Start day's session */}
-                        {isToday && (stats?.dueCards ?? 0) > 0 && day.activities.some(a => !isActivityComplete(a)) && (
+                        {isToday && canContinuePlan && day.activities.some(a => !isActivityComplete(a)) && (
                           <Button
-                            onClick={() => handleStartSession()}
+                            onClick={() => { void handleContinuePlan() }}
                             variant="outline"
                             size="sm"
                             className="w-full mt-2 gap-1.5"
                           >
                             <Play className="h-3.5 w-3.5" />
-                            Start Day {day.day} Session
+                            Continue Day {day.day}
                           </Button>
                         )}
                       </div>
@@ -986,33 +1279,101 @@ export default function PlanDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
     </div>
+  )
+}
+
+function ActivityCompletionCard({
+  summary,
+  onDismiss,
+}: {
+  summary: ActivityCompletionSummary
+  onDismiss: () => void
+}) {
+  return (
+    <motion.div
+      key={summary.key}
+      initial={{ opacity: 0, y: -12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+      className="relative overflow-hidden rounded-xl border border-green-500/20 bg-green-500/[0.04] p-4 shadow-sm"
+    >
+      <motion.div
+        aria-hidden
+        className="absolute right-5 top-5 h-14 w-14 rounded-full bg-green-400/10"
+        initial={{ scale: 0.5, opacity: 0 }}
+        animate={{ scale: [0.5, 1.4, 1], opacity: [0, 0.7, 0.25] }}
+        transition={{ duration: 0.8, ease: 'easeOut' }}
+      />
+      <div className="relative flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-500 text-white shadow-sm">
+            <Check className="h-4.5 w-4.5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">Activity Complete</h3>
+              <span className="inline-flex items-center gap-1 rounded-full bg-background/80 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                <Sparkles className="h-3 w-3 text-green-500" />
+                {summary.typeLabel}
+              </span>
+            </div>
+            <p className="mt-1 truncate text-sm text-foreground">{summary.title}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{summary.secondaryMetric}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:min-w-[220px]">
+          <div className="rounded-lg bg-background/75 p-2">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Reviewed</p>
+            <p className="mt-0.5 text-sm font-semibold">{summary.primaryMetric}</p>
+          </div>
+          <div className="rounded-lg bg-background/75 p-2">
+            <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Time</p>
+            <p className="mt-0.5 text-sm font-semibold">{summary.timeSpent}</p>
+          </div>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDismiss}
+          className="absolute right-1 top-1 h-7 w-7 p-0 sm:static"
+          aria-label="Dismiss completion summary"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </motion.div>
   )
 }
 
 function ActivityRow({
   activity,
-  isToday,
   onComplete,
+  onCompleteStudy,
   onGenerate,
-  onReview,
+  onStudy,
 }: {
   activity: PlanActivity
-  isToday: boolean
   onComplete: () => void
+  onCompleteStudy: () => void
   onGenerate: () => void
-  onReview: () => void
+  onStudy: () => void
 }) {
   const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.flashcard_review
   const isCompleted = isActivityComplete(activity)
   const state = getActivityState(activity)
   const isGenerating = activity.generationStatus === 'generating'
-  const canGenerate = isToday && (isGenerationNeeded(activity) || isGenerating) && !!studyToolTypeForActivity(activity.type)
-  const canReview = isToday
-    && !!config.reviewType
-    && activity.generationStatus !== 'not_generated'
-    && activity.generationStatus !== 'generating'
-    && activity.generationStatus !== 'failed'
+  const isReady = activity.generationStatus === 'ready' || activity.generationStatus === 'not_required'
+  const canGenerate = (isGenerationNeeded(activity) || isGenerating) && !!studyToolTypeForActivity(activity.type)
+  const canStudy = activity.type !== 'review_due_cards'
+    && isReady
+    && !!activity.generatedSourceId
+  const canCompleteStudy = canStudy && !isCompleted && activity.completionStatus === 'in_progress'
+  const timeLabel = trackedTimeLabel(activity)
 
   return (
     <div className={cn(
@@ -1043,10 +1404,12 @@ function ActivityRow({
               {config.icon}
               {config.label}
             </span>
-            <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium', state.className)}>
-              {state.icon}
-              {state.label}
-            </span>
+            {state ? (
+              <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium', state.className)}>
+                {state.icon}
+                {state.label}
+              </span>
+            ) : null}
           </div>
           <p className={cn('mt-1 text-sm truncate', isCompleted && 'line-through text-muted-foreground')}>
             {activity.topic}
@@ -1054,14 +1417,28 @@ function ActivityRow({
           {activity.notes && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">{activity.notes}</p>
           )}
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+            {activity.schedulerReason ? (
+              <span>Why: {activity.schedulerReason}</span>
+            ) : null}
+            {activity.expectedOutcome ? (
+              <span>Outcome: {activity.expectedOutcome}</span>
+            ) : null}
+            {timeLabel ? (
+              <span>{timeLabel}</span>
+            ) : null}
+          </div>
         </div>
       </div>
 
       <div className="flex items-center justify-between gap-2 pl-7 sm:pl-0">
         <span className="text-xs text-muted-foreground shrink-0">
-          {activity.cardCount ?? activity.plannedMinutes} {activityUnit(activity.type, activity.cardCount ?? activity.plannedMinutes)}
+          {activity.reviewedCount && activity.reviewedCount > 0
+            ? `${activity.reviewedCount} reviewed`
+            : `${activity.cardCount ?? activity.plannedMinutes} ${activityUnit(activity.type, activity.cardCount ?? activity.plannedMinutes)}`}
         </span>
 
+        <div className="flex items-center gap-1.5">
         {canGenerate ? (
           <Button
             variant={activity.generationStatus === 'failed' ? 'outline' : 'purple'}
@@ -1073,29 +1450,43 @@ function ActivityRow({
             {isGenerating ? <Loader2 className="h-3 w-3 animate-spin" /> : <BookOpen className="h-3 w-3" />}
             {activity.generationStatus === 'failed' ? 'Retry' : isGenerating ? 'Generating' : 'Generate'}
           </Button>
-        ) : canReview ? (
+        ) : canStudy ? (
+          <>
           <Button
             variant="outline"
             size="sm"
-            onClick={(e) => { e.stopPropagation(); onReview() }}
+            onClick={(e) => { e.stopPropagation(); onStudy() }}
             className="shrink-0 h-7 px-2.5 text-xs gap-1"
           >
-            <Play className="h-3 w-3" />
-            {isCompleted ? 'Revisit' : 'Review'}
+            <BookOpen className="h-3 w-3" />
+            {isCompleted ? 'Revisit' : activity.completionStatus === 'in_progress' ? 'Continue' : 'Open'}
           </Button>
+          {canCompleteStudy ? (
+            <Button
+              variant="purple"
+              size="sm"
+              onClick={(e) => { e.stopPropagation(); onCompleteStudy() }}
+              className="shrink-0 h-7 px-2.5 text-xs gap-1"
+            >
+              <Check className="h-3 w-3" />
+              Done
+            </Button>
+          ) : null}
+          </>
         ) : null}
+        </div>
       </div>
     </div>
   )
 }
 
-function StatCard({ icon, label, value, accent }: { icon: React.ReactNode; label: string; value: number; accent?: boolean }) {
+function StatCard({ icon, label, value, accent, suffix = '' }: { icon: React.ReactNode; label: string; value: number; accent?: boolean; suffix?: string }) {
   return (
     <div className="flex items-center gap-2.5 p-3 rounded-lg bg-muted/50">
       <div className="text-muted-foreground">{icon}</div>
       <div>
         <p className={cn('text-lg font-semibold leading-none', accent && value > 0 && 'text-primary')}>
-          {value}
+          {value}{suffix}
         </p>
         <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
       </div>

@@ -5,6 +5,65 @@ import { recordUsage } from '@/lib/usage-tracker'
 import { buildPlanAdaptationPrompt, type PlanAdaptationContext } from '@/lib/active-recall-prompts'
 import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
 
+function schedulerBucketFor(type: string): 'learn' | 'practice' | 'remember' {
+  if (type === 'review_due_cards') return 'remember'
+  if (type === 'flashcards' || type === 'quiz') return 'practice'
+  return 'learn'
+}
+
+function schedulerReasonFor(type: string) {
+  if (type === 'review_due_cards') return 'Adapted to protect retention after recent work.'
+  if (type === 'quiz') return 'Adapted to test weak or high-priority concepts.'
+  if (type === 'flashcards') return 'Adapted to strengthen active recall.'
+  if (type === 'mindmap') return 'Adapted to rebuild conceptual relationships.'
+  if (type === 'summary') return 'Adapted to refresh understanding before practice.'
+  if (type === 'smart_notes') return 'Adapted to organize details that need reinforcement.'
+  return 'Adapted to keep the plan balanced.'
+}
+
+function expectedOutcomeFor(type: string) {
+  if (type === 'review_due_cards') return 'Due review pressure reduced.'
+  if (type === 'quiz') return 'Gaps exposed through scored practice.'
+  if (type === 'flashcards') return 'Recall fluency improved.'
+  if (type === 'mindmap') return 'Concept links clarified.'
+  if (type === 'summary') return 'Topic refreshed at overview level.'
+  if (type === 'smart_notes') return 'Key details condensed.'
+  return 'Activity completed with useful study output.'
+}
+
+function enrichAdaptedSchedule(schedule: Array<{ day: number; date: string; activities: Array<Record<string, unknown>> }>) {
+  return schedule.map((day) => ({
+    ...day,
+    activities: (day.activities || []).map((activity, index) => {
+      const type = String(activity.type || 'summary')
+      return {
+        id: typeof activity.id === 'string' ? activity.id : `adapted-${day.day}-${index + 1}`,
+        ...activity,
+        generationStatus: type === 'review_due_cards'
+          ? 'not_required'
+          : typeof activity.generatedSourceId === 'string' && activity.generatedSourceId
+            ? 'ready'
+            : (activity.generationStatus || 'not_generated'),
+        generatedSourceId: typeof activity.generatedSourceId === 'string' ? activity.generatedSourceId : null,
+        completionStatus: 'not_started',
+        completed: false,
+        schedulerReason: typeof activity.schedulerReason === 'string' && activity.schedulerReason.trim()
+          ? activity.schedulerReason.trim()
+          : schedulerReasonFor(type),
+        schedulerBucket: schedulerBucketFor(type),
+        schedulerWeight: typeof activity.schedulerWeight === 'number'
+          ? Math.min(1, Math.max(0, activity.schedulerWeight))
+          : type === 'review_due_cards' ? 0.95 : type === 'quiz' ? 0.85 : 0.7,
+        expectedOutcome: typeof activity.expectedOutcome === 'string' && activity.expectedOutcome.trim()
+          ? activity.expectedOutcome.trim()
+          : expectedOutcomeFor(type),
+        rescheduleReason: 'Adapted from current learning evidence and user request.',
+      }
+    }),
+    isCompleted: false,
+  }))
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient()
@@ -38,9 +97,13 @@ export async function POST(req: NextRequest) {
 
     const learningContext = await buildActiveRecallLearningContext(supabase, user.id, { planId })
 
-    if (learningContext.summary.totalCards === 0) {
-      return NextResponse.json({ message: 'Not enough data to adapt', adapted: false })
-    }
+    const { data: activitySessions } = await supabase
+      .from('plan_activity_sessions')
+      .select('activity_type, topic, duration_ms, status, started_at')
+      .eq('user_id', user.id)
+      .eq('plan_id', planId)
+      .order('started_at', { ascending: false })
+      .limit(12)
 
     const topicPerformance = learningContext.topicPerformance
       .filter((topic) => topic.totalReviews >= 2)
@@ -52,7 +115,7 @@ export async function POST(req: NextRequest) {
         cardCount: topic.cardCount,
       }))
 
-    if (topicPerformance.length === 0) {
+    if (topicPerformance.length === 0 && !(activitySessions || []).length && !userRequest) {
       return NextResponse.json({ message: 'Not enough topic data to adapt', adapted: false })
     }
 
@@ -93,6 +156,12 @@ export async function POST(req: NextRequest) {
       daysRemaining: remainingSchedule.length,
       weakTopics,
       strongTopics,
+      activitySessionSummary: (activitySessions || []).map((session) => ({
+        activityType: session.activity_type,
+        topic: session.topic,
+        durationMs: session.duration_ms,
+        status: session.status,
+      })),
     }
 
     const messages = buildPlanAdaptationPrompt(ctx)
@@ -134,7 +203,8 @@ export async function POST(req: NextRequest) {
 
     // Merge: keep completed days, replace remaining with adapted
     const completedDays = schedule.filter((d: { day: number }) => d.day <= currentDay)
-    const newSchedule = [...completedDays, ...adaptedSchedule]
+    const enrichedAdaptedSchedule = enrichAdaptedSchedule(adaptedSchedule)
+    const newSchedule = [...completedDays, ...enrichedAdaptedSchedule]
     const newTotalActivities = newSchedule.reduce(
       (sum: number, day: { activities: Array<unknown> }) => sum + day.activities.length, 0
     )
@@ -162,10 +232,10 @@ export async function POST(req: NextRequest) {
         userRequest ? `Adjusted future days for: ${userRequest}` : 'Adjusted future days based on recent performance.',
         weakTopics.length ? `Added more focus on weak topics: ${weakTopics.slice(0, 3).join(', ')}.` : 'No severe weak topic was detected, so the plan stays balanced.',
         strongTopics.length ? `Protected lighter maintenance for strong topics: ${strongTopics.slice(0, 3).join(', ')}.` : 'No strong topic was over-prioritized.',
-        `Kept days 1-${currentDay} unchanged and rewrote ${adaptedSchedule.length} future day${adaptedSchedule.length === 1 ? '' : 's'}.`,
+        `Kept days 1-${currentDay} unchanged and rewrote ${enrichedAdaptedSchedule.length} future day${enrichedAdaptedSchedule.length === 1 ? '' : 's'} with schedule rationale.`,
       ].join(' '),
       changes: {
-        daysAdjusted: adaptedSchedule.length,
+        daysAdjusted: enrichedAdaptedSchedule.length,
         preservedThroughDay: currentDay,
         weakTopics,
         strongTopics,
