@@ -6,7 +6,7 @@ import { GEMINI_MODELS, GeminiModelSelector, type GeminiModelKey } from '@/lib/a
 import { TokenManager } from '@/lib/token-manager'
 import { resolveAIConfig } from '@/lib/ai-router'
 import { generateCompletionStream, type UserAIConfig } from '@/lib/ai-providers'
-import { generateKieDirectPdfCompletion } from '@/lib/kie-direct-pdf'
+import { generateKieDirectPdfCompletion, shouldAttachDocumentContextForQuery, shouldUseDirectPdfForQuery } from '@/lib/kie-direct-pdf'
 import { recordUsage } from '@/lib/usage-tracker'
 
 // Service role client for background operations only
@@ -14,8 +14,6 @@ const serviceSupabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
-
-const DIRECT_PDF_TEXT_THRESHOLD = 5000
 
 // Allow streaming responses up to 30 seconds
 export const maxDuration = 30
@@ -157,8 +155,10 @@ export async function POST(req: NextRequest) {
     let documentContextTokens = 0
     const directPdfUrls: string[] = []
 
-    // Add document context if any
-    if (documentId || selectedDocuments?.length) {
+    const shouldAttachDocumentContext = shouldAttachDocumentContextForQuery(lastMessage.content)
+
+    // Add document context if the selected file is relevant to the user's current request.
+    if (shouldAttachDocumentContext && (documentId || selectedDocuments?.length)) {
       const documentsToProcess = selectedDocuments?.length
         ? selectedDocuments
         : documentId
@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
               const extractedContent = doc.document_content?.trim() || ''
               const isPdf = doc.file_type === 'pdf' || doc.storage_path?.toLowerCase().endsWith('.pdf')
 
-              if (isPdf && extractedContent.length < DIRECT_PDF_TEXT_THRESHOLD && doc.storage_path) {
+              if (isPdf && shouldUseDirectPdfForQuery(extractedContent, lastMessage.content) && doc.storage_path) {
                 const { data: signedUrlData, error: signedUrlError } = await serviceSupabase.storage
                   .from('documents')
                   .createSignedUrl(doc.storage_path, 15 * 60)
@@ -272,6 +272,8 @@ export async function POST(req: NextRequest) {
           console.error('[StatefulChat] Error fetching document context:', error)
         }
       }
+    } else if (!shouldAttachDocumentContext && (documentId || selectedDocuments?.length)) {
+      console.log('[StatefulChat] Skipping selected document context for short non-document prompt')
     }
 
     // Add conversation history
@@ -306,7 +308,7 @@ export async function POST(req: NextRequest) {
               model: actualModelId,
               messages: apiMessages,
               pdfUrls: directPdfUrls,
-              maxTokens: 4096,
+              maxTokens: 8192,
               temperature: 0.5,
             })
             fullResponse = directResult.text
@@ -315,6 +317,7 @@ export async function POST(req: NextRequest) {
           } else {
             for await (const chunk of generateCompletionStream(configForStream, {
               messages: apiMessages,
+              maxTokens: 8192,
               temperature: 0.5,  // Lower temperature for faster, more focused responses
               reasoningEffort: reasoningEffort || undefined,
             })) {

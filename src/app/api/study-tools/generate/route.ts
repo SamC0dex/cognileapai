@@ -7,6 +7,7 @@ import { classifyError, addRetryAttempt } from '@/lib/retry-manager'
 import { resolveAIConfig } from '@/lib/ai-router'
 import { generateCompletion, type UserAIConfig } from '@/lib/ai-providers'
 import { recordUsage } from '@/lib/usage-tracker'
+import { shouldUseDirectPdfForQuery } from '@/lib/kie-direct-pdf'
 
 // Service role client for background operations only (bypasses RLS)
 const serviceSupabase = createClient(
@@ -107,8 +108,6 @@ const MODEL_HIERARCHY: ModelConfig[] = [
     maxRetries: 2
   }
 ]
-
-const DIRECT_PDF_TEXT_THRESHOLD = 5000
 
 function getOptimalOutputTokens(toolType: string, modelName: string): number {
   // Use tool-specific allocation, but cap at model maximum
@@ -738,7 +737,7 @@ export async function POST(req: NextRequest) {
       const extractedContent = document.document_content?.trim() || ''
       const isPdf = document.file_type === 'pdf' || document.storage_path?.toLowerCase().endsWith('.pdf')
 
-      if (isPdf && extractedContent.length < DIRECT_PDF_TEXT_THRESHOLD && document.storage_path) {
+      if (isPdf && shouldUseDirectPdfForQuery(extractedContent, `${type} ${documentTitle}`) && document.storage_path) {
         const { data: signedUrlData, error: signedUrlError } = await serviceSupabase.storage
           .from('documents')
           .createSignedUrl(document.storage_path, 15 * 60)

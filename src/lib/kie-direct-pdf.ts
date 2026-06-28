@@ -6,6 +6,46 @@ export interface DirectPdfCompletionResult {
   usage: TokenUsage | null
 }
 
+export function cleanKieArtifacts(text: string): string {
+  return text
+    .replace(/\[cite_start\]/g, '')
+    .replace(/\[cite:\s*[\d,\s-]+\]/g, '')
+    .replace(/\s+\./g, '.')
+    .trim()
+}
+
+export function shouldUseDirectPdfForQuery(extractedContent: string, userMessage: string): boolean {
+  const text = extractedContent.trim()
+  const contentLength = text.length
+  if (contentLength === 0) return true
+
+  const alphaNumericChars = (text.match(/[A-Za-z0-9]/g) || []).length
+  const alphaNumericRatio = alphaNumericChars / Math.max(contentLength, 1)
+  const wordCount = text.split(/\s+/).filter((word) => /[A-Za-z0-9]{2,}/.test(word)).length
+  const hasReadableExtraction = wordCount >= 80 && alphaNumericRatio >= 0.45
+
+  if (hasReadableExtraction) return false
+  if (contentLength < 500) return true
+
+  const query = userMessage.toLowerCase()
+  const needsPreciseDocumentLookup = /\b(point|section|subsection|subtopic|heading|chapter|page|diagram|figure|table|list|count|how many|exact|name them|cite|quote)\b/.test(query)
+  return needsPreciseDocumentLookup
+}
+
+export function shouldAttachDocumentContextForQuery(userMessage: string): boolean {
+  const query = userMessage.trim().toLowerCase()
+  const words = query.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return false
+
+  const isShortSocialPrompt =
+    words.length <= 12 &&
+    /^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|nice|test|ping)\b/.test(query)
+
+  if (isShortSocialPrompt) return false
+
+  return true
+}
+
 export async function generateKieDirectPdfCompletion({
   apiKey,
   model,
@@ -62,7 +102,7 @@ export async function generateKieDirectPdfCompletion({
   }
 
   return {
-    text: data.choices?.[0]?.message?.content || '',
+    text: cleanKieArtifacts(data.choices?.[0]?.message?.content || ''),
     model,
     usage: data.usage ? {
       promptTokens: data.usage.prompt_tokens ?? 0,

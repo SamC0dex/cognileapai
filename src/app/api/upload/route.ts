@@ -366,7 +366,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+  const pdf2jsonText = await new Promise<string>((resolve, reject) => {
     const originalWarn = console.warn
     console.warn = () => {}
 
@@ -406,6 +406,30 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
 
     pdfParser.parseBuffer(buffer)
   })
+
+  if (pdf2jsonText.trim().length > 0) {
+    return pdf2jsonText
+  }
+
+  try {
+    const pdfParseModule = await import('pdf-parse') as {
+      default?: (dataBuffer: Buffer) => Promise<{ text?: string }>
+    }
+    const pdfParse = pdfParseModule.default
+    if (!pdfParse) return ''
+
+    const originalWarn = console.warn
+    console.warn = () => {}
+    try {
+      const parsed = await pdfParse(buffer)
+      return parsed.text?.trim() || ''
+    } finally {
+      console.warn = originalWarn
+    }
+  } catch (error) {
+    console.warn('[Upload] pdf-parse fallback failed:', error)
+    return ''
+  }
 }
 
 async function extractTextFromImage(buffer: Buffer, _mimeType?: string): Promise<string> {
@@ -473,6 +497,23 @@ async function startBackgroundProcessing(documentId: string, buffer: Buffer, mim
     try {
       extractedText = await extractText(mimeType, buffer)
       console.log(`[Background] Extracted ${extractedText.length} characters from document`)
+
+      if (!extractedText.trim()) {
+        await serviceSupabase
+          .from('documents')
+          .update({
+            processing_status: 'completed',
+            chunk_count: 0,
+            document_content: '',
+            actual_tokens: 0,
+            token_count_method: 'estimation',
+            error_message: 'No extractable text found; direct PDF reading may be used for this document.'
+          })
+          .eq('id', documentId)
+
+        console.log(`[Background] No extractable text found for document ${documentId}`)
+        return
+      }
 
       // Count tokens using estimation
       let actualTokens: number | null = null

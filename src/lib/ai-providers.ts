@@ -276,6 +276,15 @@ export async function* generateCompletionStream(
   config: UserAIConfig,
   options: GenerateOptions
 ): AsyncGenerator<StreamChunk> {
+  if (config.provider === 'kie' || config.provider === 'gemini') {
+    const result = await generateKieCompletion(config, { ...options, stream: false })
+    if (result.text) {
+      yield { text: result.text, isComplete: false }
+    }
+    yield { text: '', isComplete: true, usage: result.usage }
+    return
+  }
+
   // All providers use OpenAI-compatible API
   const client = createOpenAIClient(config.provider, config.apiKey, config.model)
 

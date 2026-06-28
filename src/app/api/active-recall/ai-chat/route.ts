@@ -3,15 +3,13 @@ import { createClient } from '@/lib/supabase/server'
 import { resolveAIConfig, routedCompletionStream, type ResolvedAIConfig } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
 import { supabase as serviceSupabase } from '@/lib/supabase'
-import { generateKieDirectPdfCompletion } from '@/lib/kie-direct-pdf'
+import { generateKieDirectPdfCompletion, shouldAttachDocumentContextForQuery, shouldUseDirectPdfForQuery } from '@/lib/kie-direct-pdf'
 import { buildAgentSystemPrompt, buildAIChatSystemPrompt, type AgentContext, type AIChatContext, type PlanPerformance } from '@/lib/active-recall-prompts'
 import { buildActiveRecallLearningContext } from '@/lib/active-recall-learning-context'
 import { buildActiveRecallReadiness } from '@/lib/active-recall-readiness'
 import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
 import { RecallLayer } from '@/types/active-recall'
 import type { ChatMessage, TokenUsage } from '@/lib/ai-providers'
-
-const DIRECT_PDF_TEXT_THRESHOLD = 5000
 
 export async function POST(req: NextRequest) {
   try {
@@ -235,8 +233,10 @@ export async function POST(req: NextRequest) {
     }
 
     const directPdfUrls: string[] = []
+    const latestUserMessage = [...clientMessages].reverse().find((m) => m.role === 'user')?.content || ''
     const selectedIds = Array.isArray(selectedDocumentIds) ? selectedDocumentIds.filter(Boolean).slice(0, 3) : []
-    if (selectedIds.length > 0) {
+    const shouldAttachDocumentContext = shouldAttachDocumentContextForQuery(latestUserMessage)
+    if (selectedIds.length > 0 && shouldAttachDocumentContext) {
       const { data: selectedDocs, error: selectedDocsError } = await supabase
         .from('documents')
         .select('id, title, document_content, storage_path, file_type')
@@ -264,7 +264,7 @@ export async function POST(req: NextRequest) {
         const extractedContent = doc.document_content?.trim() || ''
         const isPdf = doc.file_type === 'pdf' || doc.storage_path?.toLowerCase().endsWith('.pdf')
 
-        if (isPdf && extractedContent.length < DIRECT_PDF_TEXT_THRESHOLD && doc.storage_path) {
+        if (isPdf && shouldUseDirectPdfForQuery(extractedContent, latestUserMessage) && doc.storage_path) {
           const { data: signedUrlData, error: signedUrlError } = await serviceSupabase.storage
             .from('documents')
             .createSignedUrl(doc.storage_path, 15 * 60)
@@ -284,6 +284,8 @@ export async function POST(req: NextRequest) {
       if (textContexts.length > 0) {
         systemPrompt += `\n\nSelected document context:\n${textContexts.join('\n\n')}`
       }
+    } else if (selectedIds.length > 0) {
+      console.log('[AIChat] Skipping selected document context for short non-document prompt')
     }
 
     const aiMessages: ChatMessage[] = [
@@ -311,7 +313,7 @@ export async function POST(req: NextRequest) {
               model: directConfig.model || process.env.KIE_DEFAULT_MODEL || 'gemini-3-flash',
               messages: aiMessages,
               pdfUrls: directPdfUrls,
-              maxTokens: 3000,
+              maxTokens: 8192,
               temperature: 0.7,
             })
 
@@ -326,7 +328,7 @@ export async function POST(req: NextRequest) {
           } else {
             const generator = routedCompletionStream(user.id, {
               messages: aiMessages,
-              maxTokens: 2000,
+              maxTokens: 8192,
               temperature: 0.7,
             })
 
