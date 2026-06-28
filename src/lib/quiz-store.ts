@@ -233,23 +233,21 @@ export const useQuizStore = create<QuizStore>()(
           } : {})
         }))
 
-        // Try to delete from database (skip for placeholders that were never saved)
-        const wasPlaceholder = previousSets.find(s => s.id === id)?.metadata?.isGenerating
-        if (!wasPlaceholder) {
-          try {
-            const response = await fetch('/api/study-tools/delete', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id })
-            })
-            if (!response.ok) {
-              console.warn('[QuizStore] Failed to delete from database, rolling back')
-              set({ quizSets: previousSets })
-            }
-          } catch (error) {
-            console.error('[QuizStore] Delete error:', error)
+        // Try to delete from database
+        try {
+          const response = await fetch('/api/study-tools/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+          })
+          // 404 = never saved to DB (failed/orphaned generation) — local removal is enough
+          if (!response.ok && response.status !== 404) {
+            console.warn('[QuizStore] Failed to delete from database, rolling back')
             set({ quizSets: previousSets })
           }
+        } catch (error) {
+          console.error('[QuizStore] Delete error:', error)
+          set({ quizSets: previousSets })
         }
       },
 

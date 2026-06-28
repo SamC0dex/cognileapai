@@ -21,11 +21,14 @@ export async function POST(req: NextRequest) {
     console.log(`[ActiveRecall] Syncing ${cards.length} ${sourceType} cards for user ${user.id}`)
 
     const sourceIds = cards.map((card) => card.id)
+    // Scope existence check to this specific source set so different sets with the same
+    // question IDs (q1, q2...) are treated as independent review cards.
     const { data: existingCards, error: existingFetchError } = await supabase
       .from('review_cards')
       .select('source_id')
       .eq('user_id', user.id)
       .eq('source_type', sourceType)
+      .eq('source_set_id', sourceSetId)
       .in('source_id', sourceIds)
 
     if (existingFetchError) {
@@ -37,11 +40,12 @@ export async function POST(req: NextRequest) {
     const newCards = cards.filter((card) => !existingIds.has(card.id))
     let synced = 0
 
-    // Insert only new cards. Existing cards preserve their SM-2 state and content.
+    // Insert only new cards. Use upsert with ignoreDuplicates to handle concurrent sync calls
+    // gracefully (race condition where two requests both see 0 existing cards for the same set).
     for (const card of newCards) {
       const { error } = await supabase
         .from('review_cards')
-        .insert({
+        .upsert({
           user_id: user.id,
           source_type: sourceType,
           source_id: card.id,
@@ -54,6 +58,9 @@ export async function POST(req: NextRequest) {
           correct_answer: card.correctAnswer ?? null,
           topic: card.topic || null,
           difficulty: card.difficulty || null,
+        }, {
+          onConflict: 'user_id,source_type,source_set_id,source_id',
+          ignoreDuplicates: true,
         })
 
       if (error) {

@@ -15,6 +15,41 @@ const serviceSupabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+/**
+ * Attempt to recover a truncated JSON array by scanning for the last complete top-level
+ * object boundary (e.g. KIE returning a partial response due to a 504 timeout).
+ */
+function repairTruncatedJsonArray(str: string): unknown[] | null {
+  try { return JSON.parse(str) as unknown[] } catch { /* fall through to repair */ }
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  let lastCompletePos = -1
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i]
+    if (escaped) { escaped = false; continue }
+    if (ch === '\\' && inString) { escaped = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '[' || ch === '{') depth++
+    else if (ch === ']' || ch === '}') {
+      depth--
+      if (depth === 1 && ch === '}') lastCompletePos = i
+    }
+  }
+
+  if (lastCompletePos > 0) {
+    try {
+      const repaired = str.substring(0, lastCompletePos + 1) + ']'
+      const result = JSON.parse(repaired)
+      if (Array.isArray(result) && result.length > 0) return result
+    } catch { /* ignore */ }
+  }
+  return null
+}
+
 
 // Vercel Hobby (free) tier: 10s max for serverless functions
 // Pro tier allows up to 60s
@@ -1041,7 +1076,9 @@ For each topic, read the source material and build a mind map that covers all th
       try {
         // Parse the JSON response from the AI
         const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-        flashcardData = JSON.parse(cleanedText)
+        const repaired = repairTruncatedJsonArray(cleanedText)
+        if (!repaired) throw new Error('Flashcard JSON is malformed and could not be repaired')
+        flashcardData = repaired
 
         if (!Array.isArray(flashcardData)) {
           throw new Error('Flashcard data is not an array')
@@ -1071,7 +1108,9 @@ For each topic, read the source material and build a mind map that covers all th
     if (type === 'quiz') {
       try {
         const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
-        quizData = JSON.parse(cleanedText)
+        const repaired = repairTruncatedJsonArray(cleanedText)
+        if (!repaired) throw new Error('Quiz JSON is malformed and could not be repaired')
+        quizData = repaired
 
         if (!Array.isArray(quizData)) {
           throw new Error('Quiz data is not an array')

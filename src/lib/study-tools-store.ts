@@ -133,6 +133,7 @@ interface StudyToolsStore {
   } | null
   pendingGenerations: ActiveGeneration[]
   resumePendingGenerations: () => Promise<void>
+  cleanupOrphanedGenerations: () => Promise<void>
   generateStudyTool: (
     type: StudyToolType,
     documentId?: string,
@@ -485,7 +486,50 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
     const pending = get().pendingGenerations
     if (!pending.length) return
 
-    for (const generation of pending) {
+    const MAX_AGE_MS = 10 * 60 * 1000 // 10 minutes — discard anything older
+    const now = Date.now()
+    const fresh = pending.filter(gen => now - gen.startTime < MAX_AGE_MS)
+    const stale = pending.filter(gen => now - gen.startTime >= MAX_AGE_MS)
+
+    if (stale.length > 0) {
+      console.warn('[StudyToolsStore] Discarding stale pending generations:', stale.map(g => g.id))
+      set({ pendingGenerations: fresh })
+      for (const gen of stale) {
+        get()._cleanupGenerationTracking(gen.id)
+      }
+
+      // Remove stale isGenerating placeholders from each subsidiary store
+      const staleFlashcardIds = stale.filter(g => g.type === 'flashcards').map(g => g.id)
+      const staleQuizIds = stale.filter(g => g.type === 'quiz').map(g => g.id)
+      const staleMindMapIds = stale.filter(g => g.type === 'mind-map').map(g => g.id)
+      const staleContentIds = stale.filter(g => g.type !== 'flashcards' && g.type !== 'quiz' && g.type !== 'mind-map').map(g => g.id)
+
+      if (staleContentIds.length > 0) {
+        set(state => ({
+          generatedContent: state.generatedContent.filter(c => !staleContentIds.includes(c.id))
+        }))
+      }
+      if (staleFlashcardIds.length > 0) {
+        const { useFlashcardStore } = await import('./flashcard-store')
+        useFlashcardStore.setState(state => ({
+          flashcardSets: state.flashcardSets.filter((s: FlashcardSet) => !staleFlashcardIds.includes(s.id))
+        }))
+      }
+      if (staleQuizIds.length > 0) {
+        const { useQuizStore } = await import('./quiz-store')
+        useQuizStore.setState(state => ({
+          quizSets: state.quizSets.filter((s: QuizSet) => !staleQuizIds.includes(s.id))
+        }))
+      }
+      if (staleMindMapIds.length > 0) {
+        const { useMindMapStore } = await import('./mindmap-store')
+        useMindMapStore.setState(state => ({
+          mindMapSets: state.mindMapSets.filter((s: MindMapSet) => !staleMindMapIds.includes(s.id))
+        }))
+      }
+    }
+
+    for (const generation of fresh) {
       await get().generateStudyTool(
         generation.type,
         generation.documentId,
@@ -501,6 +545,61 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
       )
     }
   },
+
+  cleanupOrphanedGenerations: async () => {
+    const state = get()
+    // Build the set of generation IDs that are legitimately in-flight
+    const trackedIds = new Set([
+      ...state.activeGenerations.keys(),
+      ...state.pendingGenerations.map(g => g.id)
+    ])
+
+    // generatedContent orphans (study-guide, smart-notes, etc.)
+    const orphanedContentIds = state.generatedContent
+      .filter(c => c.isGenerating && !trackedIds.has(c.id))
+      .map(c => c.id)
+    if (orphanedContentIds.length > 0) {
+      console.warn('[StudyToolsStore] Removing orphaned content placeholders:', orphanedContentIds)
+      set(s => ({ generatedContent: s.generatedContent.filter(c => !orphanedContentIds.includes(c.id)) }))
+    }
+
+    // Flashcard store orphans
+    const { useFlashcardStore } = await import('./flashcard-store')
+    const orphanedFlashcardIds = useFlashcardStore.getState().flashcardSets
+      .filter((s: FlashcardSet) => s.metadata?.isGenerating && !trackedIds.has(s.id))
+      .map((s: FlashcardSet) => s.id)
+    if (orphanedFlashcardIds.length > 0) {
+      console.warn('[StudyToolsStore] Removing orphaned flashcard placeholders:', orphanedFlashcardIds)
+      useFlashcardStore.setState(s => ({
+        flashcardSets: s.flashcardSets.filter((fs: FlashcardSet) => !orphanedFlashcardIds.includes(fs.id))
+      }))
+    }
+
+    // Quiz store orphans
+    const { useQuizStore } = await import('./quiz-store')
+    const orphanedQuizIds = useQuizStore.getState().quizSets
+      .filter((s: QuizSet) => s.metadata?.isGenerating && !trackedIds.has(s.id))
+      .map((s: QuizSet) => s.id)
+    if (orphanedQuizIds.length > 0) {
+      console.warn('[StudyToolsStore] Removing orphaned quiz placeholders:', orphanedQuizIds)
+      useQuizStore.setState(s => ({
+        quizSets: s.quizSets.filter((qs: QuizSet) => !orphanedQuizIds.includes(qs.id))
+      }))
+    }
+
+    // MindMap store orphans
+    const { useMindMapStore } = await import('./mindmap-store')
+    const orphanedMindMapIds = useMindMapStore.getState().mindMapSets
+      .filter((s: MindMapSet) => s.metadata?.isGenerating && !trackedIds.has(s.id))
+      .map((s: MindMapSet) => s.id)
+    if (orphanedMindMapIds.length > 0) {
+      console.warn('[StudyToolsStore] Removing orphaned mindmap placeholders:', orphanedMindMapIds)
+      useMindMapStore.setState(s => ({
+        mindMapSets: s.mindMapSets.filter((mm: MindMapSet) => !orphanedMindMapIds.includes(mm.id))
+      }))
+    }
+  },
+
   generateStudyTool: async (
     type: StudyToolType,
     documentId?: string,
@@ -3476,12 +3575,19 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
             totalGeneratedContent: state.generatedContent?.length || 0
           })
           
+          // Always clean up orphaned isGenerating placeholders on startup (no active/pending generation)
+          queueMicrotask(() => {
+            state.cleanupOrphanedGenerations().catch(error => {
+              console.error('[StudyToolsStore] Failed to clean up orphaned generations:', error)
+            })
+          })
+
           if (hasPending) {
             console.log('[StudyToolsStore] Found pending generations, will resume:', {
               fromArray: pendingFromArray.map(g => ({ id: g.id, type: g.type })),
               fromContent: pendingFromContent.map(c => ({ id: c.id, title: c.title, progress: c.generationProgress }))
             })
-            
+
             // Use queueMicrotask to ensure the store is fully initialized before resuming
             queueMicrotask(() => {
               // Resume from pendingGenerations array if available
@@ -3491,7 +3597,7 @@ export const useStudyToolsStore = create<StudyToolsStore>()(
                   console.error('[StudyToolsStore] Failed to resume from array:', error)
                 })
               }
-              
+
               // Also resume any isGenerating items from generatedContent
               pendingFromContent.forEach(content => {
                 console.log('[StudyToolsStore] Resuming from generatedContent:', content.id, content.type)

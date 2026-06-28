@@ -164,54 +164,85 @@ async function generateKieCompletion(
   config: UserAIConfig,
   options: GenerateOptions
 ): Promise<CompletionResult> {
-  const response = await fetch(`${PROVIDERS.kie.baseUrl}/${config.model}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      messages: [
-        {
-          role: 'user',
-          content: [{ type: 'text', text: flattenMessages(options.messages) }],
+  const doRequest = async (messages: Array<{ role: string; content: string }>) => {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 90_000)
+
+    let response: Response
+    try {
+      response = await fetch(`${PROVIDERS.kie.baseUrl}/${config.model}/v1/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          'Content-Type': 'application/json',
         },
-      ],
-      max_tokens: options.maxTokens || 4096,
-      temperature: options.temperature ?? 0.7,
-      stream: false,
-    }),
-  })
+        body: JSON.stringify({
+          messages,
+          max_tokens: options.maxTokens || 4096,
+          temperature: options.temperature ?? 0.7,
+          stream: false,
+        }),
+      })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new Error('Kie.ai request timed out after 90 seconds. Please try again.')
+      }
+      throw err
+    } finally {
+      clearTimeout(timeoutId)
+    }
 
-  const responseText = await response.text()
-  if (!response.ok) {
-    throw new Error(`${response.status} ${responseText || response.statusText}`)
+    const responseText = await response.text()
+    if (!response.ok) {
+      // Avoid dumping full HTML error pages (Cloudflare 524, 502, etc.) into the message
+      const isHtml = responseText.trimStart().startsWith('<')
+      const detail = isHtml
+        ? `server error page (HTTP ${response.status})`
+        : responseText || response.statusText
+      throw new Error(`${response.status} ${detail}`)
+    }
+
+    let data: Record<string, unknown>
+    try {
+      data = JSON.parse(responseText)
+    } catch {
+      throw new Error('AI provider returned unparseable response')
+    }
+
+    const choices = data.choices as Array<{ message?: { content?: string } }> | undefined
+    if (!choices || choices.length === 0) {
+      const code = data.code != null ? `code ${String(data.code)}` : 'no choices'
+      const message = typeof data.msg === 'string' ? data.msg : 'AI provider returned an empty response'
+      throw new Error(`Kie.ai: ${message} (${code})`)
+    }
+
+    const usage = data.usage ? {
+      promptTokens: (data.usage as Record<string, number>).prompt_tokens ?? 0,
+      completionTokens: (data.usage as Record<string, number>).completion_tokens ?? 0,
+      totalTokens: (data.usage as Record<string, number>).total_tokens ?? 0,
+    } : null
+
+    return {
+      text: choices[0]?.message?.content || '',
+      usage,
+    }
   }
 
-  let data: Record<string, unknown>
-  try {
-    data = JSON.parse(responseText)
-  } catch {
-    throw new Error('AI provider returned unparseable response')
+  // Attempt 1: proper system/user roles with plain string content
+  const result = await doRequest(
+    options.messages.map(m => ({ role: m.role, content: m.content }))
+  )
+
+  // KIE's Gemini proxy sometimes refuses structured-output prompts (flashcards, quiz)
+  // when they arrive with a system role. Retry by merging into a single user message.
+  if (result.text.length < 100 && /cannot fulfill|i cannot|unable to/i.test(result.text)) {
+    console.warn('[KIE] Model refused with system role, retrying with merged user message')
+    const merged = options.messages.map(m => m.content).join('\n\n')
+    return doRequest([{ role: 'user', content: merged }])
   }
 
-  const choices = data.choices as Array<{ message?: { content?: string } }> | undefined
-  if (!choices || choices.length === 0) {
-    const code = data.code != null ? `code ${String(data.code)}` : 'no choices'
-    const message = typeof data.msg === 'string' ? data.msg : 'AI provider returned an empty response'
-    throw new Error(`Kie.ai: ${message} (${code})`)
-  }
-
-  const usage = data.usage ? {
-    promptTokens: (data.usage as Record<string, number>).prompt_tokens ?? 0,
-    completionTokens: (data.usage as Record<string, number>).completion_tokens ?? 0,
-    totalTokens: (data.usage as Record<string, number>).total_tokens ?? 0,
-  } : null
-
-  return {
-    text: choices[0]?.message?.content || '',
-    usage,
-  }
+  return result
 }
 
 /**
@@ -225,14 +256,13 @@ export async function generateCompletion(
     return generateKieCompletion(config, options)
   }
 
-  // All providers use OpenAI-compatible API (including Kie.ai for Gemini models)
   const client = createOpenAIClient(config.provider, config.apiKey, config.model)
 
   const requestBody = {
     model: config.model,
     messages: options.messages.map(m => ({
       role: m.role,
-      content: messageContentForProvider(config.provider, m.content),
+      content: m.content,
     })),
     max_tokens: options.maxTokens || 4096,
     temperature: options.temperature ?? 0.7,
@@ -241,7 +271,7 @@ export async function generateCompletion(
 
   let response = await client.chat.completions.create(requestBody as never) as unknown as Record<string, unknown>
 
-  // Kie.ai sometimes returns raw JSON string instead of parsed object
+  // Kie.ai sometimes returns a raw JSON string instead of a parsed object
   if (typeof response === 'string') {
     try {
       response = JSON.parse(response)

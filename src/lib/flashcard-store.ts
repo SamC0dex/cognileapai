@@ -280,14 +280,14 @@ export const useFlashcardStore = create<FlashcardStore>()(
 
           console.log('[FlashcardStore] Delete API response status:', response.status)
 
-          if (!response.ok) {
+          // 404 = never saved to DB (failed/orphaned generation) — local removal is enough
+          if (!response.ok && response.status !== 404) {
             const errorText = await response.text()
             console.error('[FlashcardStore] Delete API error response:', errorText)
             throw new Error(`Failed to delete from database: ${response.status} - ${errorText}`)
           }
 
-          const result = await response.json()
-          console.log('[FlashcardStore] Successfully deleted from database:', result)
+          console.log('[FlashcardStore] Successfully deleted (status:', response.status, ')')
         } catch (error) {
           console.error('[FlashcardStore] Failed to sync deletion to database:', error)
 
@@ -298,7 +298,6 @@ export const useFlashcardStore = create<FlashcardStore>()(
             )
           }))
 
-          // Re-throw error to allow UI to show error message if needed
           throw error
         }
       },

@@ -749,7 +749,7 @@ export function DashboardTabs({
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {studyTools.map((content, index) => (
                           <motion.div
-                            key={content.id}
+                            key={`tool-${content.id}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.3, delay: index * 0.05 }}
@@ -762,7 +762,7 @@ export function DashboardTabs({
                         ))}
                         {flashcards.map((flashcardSet, index) => (
                           <motion.div
-                            key={flashcardSet.id}
+                            key={`flash-${flashcardSet.id}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.3, delay: (studyTools.length + index) * 0.05 }}
@@ -775,7 +775,7 @@ export function DashboardTabs({
                         ))}
                         {quizzes.map((quizSet, index) => (
                           <motion.div
-                            key={quizSet.id}
+                            key={`quiz-${quizSet.id}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.3, delay: (studyTools.length + flashcards.length + index) * 0.05 }}
@@ -788,7 +788,7 @@ export function DashboardTabs({
                         ))}
                         {mindMaps.map((mindMapSet, index) => (
                           <motion.div
-                            key={mindMapSet.id}
+                            key={`map-${mindMapSet.id}`}
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.3, delay: (studyTools.length + flashcards.length + quizzes.length + index) * 0.05 }}
@@ -805,7 +805,7 @@ export function DashboardTabs({
                       <div className="space-y-2">
                         {studyTools.map((content, index) => (
                           <motion.div
-                            key={content.id}
+                            key={`tool-${content.id}`}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.2, delay: index * 0.03 }}
@@ -818,7 +818,7 @@ export function DashboardTabs({
                         ))}
                         {flashcards.map((flashcardSet, index) => (
                           <motion.div
-                            key={flashcardSet.id}
+                            key={`flash-${flashcardSet.id}`}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.2, delay: (studyTools.length + index) * 0.03 }}
@@ -831,7 +831,7 @@ export function DashboardTabs({
                         ))}
                         {quizzes.map((quizSet, index) => (
                           <motion.div
-                            key={quizSet.id}
+                            key={`quiz-${quizSet.id}`}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.2, delay: (studyTools.length + flashcards.length + index) * 0.03 }}
@@ -844,7 +844,7 @@ export function DashboardTabs({
                         ))}
                         {mindMaps.map((mindMapSet, index) => (
                           <motion.div
-                            key={mindMapSet.id}
+                            key={`map-${mindMapSet.id}`}
                             initial={{ opacity: 0, x: -20 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.2, delay: (studyTools.length + flashcards.length + quizzes.length + index) * 0.03 }}
