@@ -1,66 +1,84 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Brain, MessageSquare, Zap, Sparkles, FileText, Search } from "lucide-react"
+import { Brain, MessageSquare, Zap, FileText, Network, RotateCcw } from "lucide-react"
 import { SectionBackground } from "./backgrounds"
 
 const FEATURES = [
   {
     icon: <Brain className="h-6 w-6" />,
-    title: "AI-Powered Study Tools",
-    desc: "Transform any document into comprehensive study guides, smart summaries, and organized notes in seconds. Our AI understands context and creates learning materials tailored to how you learn best.",
+    title: "6 AI Study Tools",
+    desc: "From a single PDF, instantly generate smart summaries, comprehensive study guides, organized notes, flashcards, quizzes, and visual mind maps — all in under 60 seconds.",
     color: "from-teal-500 to-cyan-400",
-    glow: "rgba(20, 184, 166, 0.3)",
+    badge: null,
+  },
+  {
+    icon: <RotateCcw className="h-6 w-6" />,
+    title: "Active Recall & Spaced Repetition",
+    desc: "Cement knowledge with our 4-layer recall system: Absorb → Recognize → Retrieve → Mastered. Powered by the SM-2 algorithm, the same science used by top memory champions.",
+    color: "from-emerald-500 to-teal-400",
+    badge: "Signature Feature",
   },
   {
     icon: <MessageSquare className="h-6 w-6" />,
     title: "Intelligent Document Chat",
-    desc: "Ask anything about your documents and get instant, contextual answers. It's like having a personal tutor who has read and understood every page, ready to explain concepts and clarify confusion.",
+    desc: "Ask anything about your documents and get instant, contextual answers. Like a personal tutor who has read every page — powered by Gemini's 250K token context window.",
     color: "from-blue-500 to-indigo-400",
-    glow: "rgba(59, 130, 246, 0.3)",
+    badge: null,
+  },
+  {
+    icon: <Network className="h-6 w-6" />,
+    title: "Interactive Mind Maps",
+    desc: "Visualize concepts and their connections as interactive node graphs. Pan, zoom, explore — and sync mind map nodes directly into your active recall review queue.",
+    color: "from-violet-500 to-indigo-400",
+    badge: null,
   },
   {
     icon: <Zap className="h-6 w-6" />,
     title: "Lightning-Fast Generation",
-    desc: "Get complete study materials in under a minute. No waiting, no manual work—just upload your document and watch as AI instantly creates everything you need to excel.",
+    desc: "Complete study materials ready in under a minute. No waiting, no manual work — just upload and watch AI create everything you need to excel.",
     color: "from-amber-500 to-orange-400",
-    glow: "rgba(245, 158, 11, 0.3)",
-  },
-  {
-    icon: <Sparkles className="h-6 w-6" />,
-    title: "Interactive Flashcards",
-    desc: "Master concepts with intelligent flashcard generation and spaced repetition. Swipe through cards with Tinder-style animations, track your progress, and focus on areas that need improvement.",
-    color: "from-purple-500 to-pink-400",
-    glow: "rgba(168, 85, 247, 0.3)",
-  },
-  {
-    icon: <Search className="h-6 w-6" />,
-    title: "Smart Document Chat",
-    desc: "Ask questions about your documents and get instant, intelligent answers. Powered by Google Gemini's 250K token context window for deep understanding.",
-    color: "from-emerald-500 to-teal-400",
-    glow: "rgba(16, 185, 129, 0.3)",
+    badge: null,
   },
   {
     icon: <FileText className="h-6 w-6" />,
     title: "Export Anywhere",
     desc: "Take your learning offline with professional PDF and DOCX exports. Beautifully formatted study materials you can print, share, or access anywhere.",
     color: "from-rose-500 to-red-400",
-    glow: "rgba(244, 63, 94, 0.3)",
+    badge: null,
   },
 ] as const
 
-function FeatureCard({ feature, index }: { feature: typeof FEATURES[number]; index: number }) {
+function FeatureCard({ feature, index }: { feature: (typeof FEATURES)[number]; index: number }) {
+  const isHighlighted = feature.badge !== null
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      transition={{ duration: 0.5, delay: index * 0.1 }}
+      transition={{ duration: 0.5, delay: index * 0.08 }}
       className="group relative h-full"
     >
-      <div className="relative h-full overflow-hidden rounded-2xl border border-border/50 bg-white/95 dark:bg-card/80 p-6 backdrop-blur-sm transition-all duration-300 hover:border-primary/50 shadow-lg hover:shadow-xl hover:scale-105">
+      <div
+        className={`relative h-full overflow-hidden rounded-2xl border p-6 backdrop-blur-sm transition-all duration-300 shadow-lg hover:shadow-xl hover:scale-[1.02] ${
+          isHighlighted
+            ? "border-teal-400/40 bg-gradient-to-br from-teal-500/5 to-emerald-500/5 dark:from-teal-500/10 dark:to-emerald-500/10 hover:border-teal-400/60"
+            : "border-border/50 bg-white/95 dark:bg-card/80 hover:border-primary/40"
+        }`}
+      >
+        {/* Highlighted badge */}
+        {feature.badge && (
+          <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-teal-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse" />
+            {feature.badge}
+          </div>
+        )}
+
         {/* Icon */}
-        <div className={`mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br ${feature.color} text-white shadow-lg`}>
+        <div
+          className={`mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br ${feature.color} text-white shadow-lg`}
+        >
           {feature.icon}
         </div>
 
@@ -74,7 +92,7 @@ function FeatureCard({ feature, index }: { feature: typeof FEATURES[number]; ind
 
 export default function FeaturesSection() {
   return (
-    <section id="features" className="relative py-10 sm:py-16 overflow-hidden w-full">
+    <section id="features" className="relative py-16 sm:py-24 overflow-hidden w-full">
       <SectionBackground />
 
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
@@ -87,19 +105,19 @@ export default function FeaturesSection() {
           className="mx-auto max-w-3xl text-center"
         >
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm backdrop-blur-sm">
-            <Sparkles className="h-3.5 w-3.5 text-primary" />
-            <span className="font-medium">Powered by AI</span>
+            <Brain className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium">Built for Deep Learning</span>
           </div>
 
           <h2 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
             Everything You Need to{" "}
-            <span className="bg-gradient-to-r from-primary via-amber-500 to-primary bg-clip-text text-transparent animate-gradient" style={{ backgroundSize: "200% auto" }}>
+            <span className="bg-gradient-to-r from-primary via-amber-500 to-primary bg-clip-text text-transparent">
               Master Anything
             </span>
           </h2>
 
           <p className="mt-6 text-lg text-muted-foreground sm:text-xl">
-            Powerful tools that transform dense documents into deep understanding. Study smarter, not harder.
+            Not just study tools — a complete learning system. From first read to long-term retention.
           </p>
         </motion.div>
 
@@ -113,4 +131,3 @@ export default function FeaturesSection() {
     </section>
   )
 }
-
