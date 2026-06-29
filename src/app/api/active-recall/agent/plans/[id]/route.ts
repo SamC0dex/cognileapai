@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
+import { normalizePlanDisplaySchedule } from '@/lib/active-recall-plan-display'
 
 type Params = { params: Promise<{ id: string }> }
 
 type ScheduleDayRecord = Record<string, unknown> & {
+  day?: number
+  date?: string
   activities: Array<Record<string, unknown>>
 }
 
@@ -58,6 +61,38 @@ function activitySessionMetrics(activity: Record<string, unknown>, durationMs: n
   }
 }
 
+function schedulerBucketFor(type: string): 'learn' | 'practice' | 'remember' {
+  if (type === 'review_due_cards') return 'remember'
+  if (type === 'flashcards' || type === 'quiz' || type === 'flashcard_review' || type === 'quiz_session') return 'practice'
+  return 'learn'
+}
+
+function generatedSourceTypeFor(type: string) {
+  if (type === 'flashcards' || type === 'flashcard_review') return 'flashcard_set'
+  if (type === 'quiz' || type === 'quiz_session') return 'quiz_set'
+  if (type === 'mindmap' || type === 'mindmap_review') return 'mindmap_set'
+  if (type === 'review_due_cards') return 'review_cards'
+  return 'output'
+}
+
+function defaultReasonFor(type: string) {
+  if (type === 'flashcards') return 'Added from Study Agent request to create recall practice.'
+  if (type === 'quiz') return 'Added from Study Agent request to test understanding.'
+  if (type === 'mindmap') return 'Added from Study Agent request to review concept relationships.'
+  if (type === 'summary') return 'Added from Study Agent request to refresh the topic overview.'
+  if (type === 'smart_notes') return 'Added from Study Agent request to organize the material.'
+  return 'Added from Study Agent request.'
+}
+
+function expectedOutcomeFor(type: string) {
+  if (type === 'flashcards') return 'New recall prompts reviewed through Active Recall.'
+  if (type === 'quiz') return 'Knowledge gaps checked with practice questions.'
+  if (type === 'mindmap') return 'Concept structure reviewed visually.'
+  if (type === 'summary') return 'Topic refreshed at overview level.'
+  if (type === 'smart_notes') return 'Key details captured for later review.'
+  return 'Requested study material completed.'
+}
+
 // GET /api/active-recall/agent/plans/[id] — full plan with schedule
 export async function GET(req: NextRequest, { params }: Params) {
   try {
@@ -79,18 +114,27 @@ export async function GET(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Plan not found' }, { status: 404 })
     }
 
-    const schedule = typeof plan.schedule === 'string'
+    const rawSchedule = typeof plan.schedule === 'string'
       ? JSON.parse(plan.schedule)
       : plan.schedule
-
-    const displayCurrentDay = getCalendarPlanDay(schedule, plan.created_at)
 
     // Get card counts per source type for this plan
     const { data: cards } = await supabase
       .from('review_cards')
-      .select('source_type, recall_layer, next_review_at')
+      .select('source_type, source_set_id, recall_layer, next_review_at')
       .eq('user_id', user.id)
       .eq('plan_id', id)
+
+    const cardCountsBySourceSet: Record<string, number> = {}
+    cards?.forEach((card) => {
+      if (card.source_set_id) {
+        cardCountsBySourceSet[card.source_set_id] = (cardCountsBySourceSet[card.source_set_id] || 0) + 1
+      }
+    })
+
+    const schedule = normalizePlanDisplaySchedule(rawSchedule, plan.onboarding_context, cardCountsBySourceSet)
+
+    const displayCurrentDay = getCalendarPlanDay(schedule, plan.created_at)
 
     const totalCards = cards?.length || 0
     const dueCards = cards?.filter(c => new Date(c.next_review_at) <= new Date()).length || 0
@@ -426,6 +470,89 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       }
 
       return NextResponse.json({ success: true, activity })
+    }
+
+    if (action === 'add_activity') {
+      const {
+        day,
+        type,
+        topic,
+        documentId,
+        plannedMinutes,
+        generatedSourceId,
+        generatedSourceType,
+        cardCount,
+        notes,
+      } = body as {
+        day?: number
+        type?: string
+        topic?: string
+        documentId?: string
+        plannedMinutes?: number
+        generatedSourceId?: string | null
+        generatedSourceType?: string | null
+        cardCount?: number
+        notes?: string
+      }
+
+      const allowedTypes = new Set(['study_guide', 'summary', 'smart_notes', 'mindmap', 'flashcards', 'quiz', 'review_due_cards'])
+      const activityType = typeof type === 'string' ? type : ''
+      if (!allowedTypes.has(activityType)) {
+        return NextResponse.json({ error: 'Invalid activity type' }, { status: 400 })
+      }
+
+      const schedule = cloneSchedule(plan.schedule)
+      const requestedDay = typeof day === 'number' && Number.isFinite(day)
+        ? Math.max(1, Math.round(day))
+        : getCalendarPlanDay(schedule, plan.created_at)
+      const dayEntry = schedule.find((d) => d.day === requestedDay)
+      if (!dayEntry) {
+        return NextResponse.json({ error: 'Target day not found' }, { status: 400 })
+      }
+
+      const newActivity = {
+        id: `agent-added-${requestedDay}-${Date.now()}`,
+        type: activityType,
+        documentId: documentId || (Array.isArray(plan.document_ids) ? plan.document_ids[0] : undefined),
+        topic: topic?.trim() || 'Agent requested material',
+        plannedMinutes: typeof plannedMinutes === 'number' && Number.isFinite(plannedMinutes)
+          ? Math.max(5, Math.round(plannedMinutes))
+          : activityType === 'quiz' ? 20 : activityType === 'flashcards' ? 15 : 15,
+        generationStatus: generatedSourceId ? 'ready' : activityType === 'review_due_cards' ? 'not_required' : 'not_generated',
+        generatedSourceId: generatedSourceId || null,
+        generatedSourceType: generatedSourceType || generatedSourceTypeFor(activityType),
+        sourceSetId: generatedSourceId || null,
+        completionStatus: 'not_started',
+        notes: notes || 'Added by Study Agent.',
+        cardCount: typeof cardCount === 'number' && Number.isFinite(cardCount) ? Math.max(0, Math.round(cardCount)) : undefined,
+        schedulerReason: defaultReasonFor(activityType),
+        schedulerBucket: schedulerBucketFor(activityType),
+        schedulerWeight: activityType === 'review_due_cards' ? 0.95 : activityType === 'quiz' ? 0.85 : 0.75,
+        expectedOutcome: expectedOutcomeFor(activityType),
+        rescheduleReason: 'Inserted by Study Agent from user request.',
+        completed: false,
+      }
+
+      dayEntry.activities.push(newActivity)
+      dayEntry.isCompleted = false
+
+      const newTotalActivities = schedule.reduce((sum, d) => sum + d.activities.length, 0)
+      const { error } = await supabase
+        .from('agent_study_plans')
+        .update({
+          schedule,
+          total_activities: newTotalActivities,
+          status: plan.status === 'completed' ? 'active' : plan.status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .eq('user_id', user.id)
+
+      if (error) {
+        return NextResponse.json({ error: 'Failed to add activity' }, { status: 500 })
+      }
+
+      return NextResponse.json({ success: true, activity: newActivity, totalActivities: newTotalActivities })
     }
 
     if (action === 'complete_session') {

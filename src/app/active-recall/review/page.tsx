@@ -82,6 +82,8 @@ function ReviewPageInner() {
   const searchParams = useSearchParams()
   const planId = searchParams.get('plan_id')
   const sourceTypeFilter = searchParams.get('source_type')
+  const sourceSetId = searchParams.get('source_set_id')
+  const reviewMode = searchParams.get('review_mode')
   const includeAll = searchParams.get('include_all') === 'true'
 
   const [cardTimer, setCardTimer] = useState(0)
@@ -92,6 +94,10 @@ function ReviewPageInner() {
   const [isInitializing, setIsInitializing] = useState(true)
   const [showSummary, setShowSummary] = useState(false)
   const initStartedRef = useRef(false)
+
+  useEffect(() => {
+    window.dispatchEvent(new Event('collapse-study-tools-panel'))
+  }, [])
 
   useEffect(() => {
     const storeState = useReviewStore.getState()
@@ -143,6 +149,12 @@ function ReviewPageInner() {
     }
     if (sourceTypeFilter) {
       params.set('source_type', sourceTypeFilter)
+    }
+    if (sourceSetId) {
+      params.set('source_set_id', sourceSetId)
+    }
+    if (reviewMode) {
+      params.set('review_mode', reviewMode)
     }
     if (includeAll) {
       params.set('include_all', 'true')

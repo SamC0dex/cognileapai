@@ -11,6 +11,7 @@ type PlanGoal = 'exam_prep' | 'understanding' | 'review' | 'custom'
 type PriorKnowledge = 'new' | 'some_exposure' | 'refreshing'
 type CurrentUnderstanding = 'new' | 'some_exposure' | 'comfortable' | 'advanced'
 type PreferredIntensity = 'light' | 'standard' | 'intensive'
+type ExistingMaterialType = 'study_guide' | 'summary' | 'smart_notes' | 'mindmap' | 'flashcards' | 'quiz'
 
 type DocumentContext = {
   id: string
@@ -44,6 +45,39 @@ const ACTIVITY_DEFAULT_MINUTES: Record<PlanActivityType, number> = {
   flashcards: 15,
   quiz: 20,
   review_due_cards: 15,
+}
+
+function dateKeyInTimeZone(date: Date, timeZone = 'Asia/Calcutta') {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const get = (type: string) => parts.find((part) => part.type === type)?.value
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+function addDaysToDateKey(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + days))
+  return date.toISOString().split('T')[0]
+}
+
+function outputTypeToMaterialType(type: string): ExistingMaterialType | null {
+  if (type === 'study_guide') return 'study_guide'
+  if (type === 'summary') return 'summary'
+  if (type === 'notes') return 'smart_notes'
+  if (type === 'mind_map') return 'mindmap'
+  if (type === 'flashcards') return 'flashcards'
+  if (type === 'quiz') return 'quiz'
+  return null
+}
+
+function normalizeDifficulty(value: unknown): string | null {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['easy', 'medium', 'hard'].includes(normalized)) return normalized
+  return null
 }
 
 function normalizeGoal(goal: unknown): PlanGoal {
@@ -139,6 +173,30 @@ function normalizeSchedulerBucket(value: unknown, type: PlanActivityType): 'lear
   if (type === 'review_due_cards') return 'remember'
   if (type === 'flashcards' || type === 'quiz') return 'practice'
   return 'learn'
+}
+
+function isGenericTopic(topic: string) {
+  const normalized = topic.trim().toLowerCase()
+  return !normalized
+    || normalized === 'full document'
+    || normalized === 'entire document'
+    || normalized === 'whole document'
+    || normalized === 'general'
+    || normalized === 'mixed review'
+}
+
+function topicForActivity(type: PlanActivityType, documentContext: DocumentContext[], index: number) {
+  const doc = documentContext[index % Math.max(1, documentContext.length)]
+  const sectionCandidate = doc?.sectionTitles?.[index % Math.max(1, doc.sectionTitles.length)]
+  const section = sectionCandidate && !isGenericTopic(sectionCandidate) ? sectionCandidate : undefined
+  const base = section || doc?.title || 'Core concepts'
+  if (type === 'flashcards') return `${base} recall prompts`
+  if (type === 'quiz') return `${base} practice questions`
+  if (type === 'review_due_cards') return `${base} due review`
+  if (type === 'mindmap') return `${base} concept map`
+  if (type === 'summary') return `${base} overview`
+  if (type === 'smart_notes') return `${base} notes`
+  return `${base} study guide`
 }
 
 function defaultSchedulerReason(type: PlanActivityType): string {
@@ -237,13 +295,19 @@ function normalizeActivity(
 function normalizeSchedule(
   schedule: Array<{ day: number; date: string; activities: Array<Record<string, unknown>> }>,
   dates: string[],
-  documentIds: string[]
+  documentIds: string[],
+  documentContext: DocumentContext[]
 ): PlanScheduleDay[] {
   return schedule.map((day, dayIndex) => {
     const activities = Array.isArray(day.activities) ? day.activities : []
-    const normalizedActivities = activities.map((activity, activityIndex) =>
-      normalizeActivity(activity, documentIds, dayIndex * 10 + activityIndex)
-    )
+    const normalizedActivities = activities.map((activity, activityIndex) => {
+      const normalized = normalizeActivity(activity, documentIds, dayIndex * 10 + activityIndex)
+      if (!isGenericTopic(normalized.topic)) return normalized
+      return {
+        ...normalized,
+        topic: topicForActivity(normalized.type as PlanActivityType, documentContext, dayIndex + activityIndex),
+      }
+    })
 
     return {
       day: dayIndex + 1,
@@ -553,12 +617,21 @@ export async function POST(req: NextRequest) {
     })
     const planDocumentIds = documentContext.map((doc) => doc.id)
 
-    // Auto-sync any unsynced mind maps from outputs table before counting cards
-    const { data: mindMapOutputs } = await supabase
+    const { data: generatedOutputs } = await supabase
       .from('outputs')
-      .select('id, payload, document_id')
-      .eq('type', 'mind_map')
+      .select('id, type, payload, document_id')
       .in('document_id', planDocumentIds)
+
+    const existingMaterialIds = new Map<ExistingMaterialType, string>()
+    ;(generatedOutputs || []).forEach((output) => {
+      const materialType = outputTypeToMaterialType(output.type)
+      if (materialType && !existingMaterialIds.has(materialType)) {
+        existingMaterialIds.set(materialType, output.id)
+      }
+    })
+
+    // Auto-sync any unsynced mind maps from outputs table before counting cards
+    const mindMapOutputs = (generatedOutputs || []).filter((output) => output.type === 'mind_map')
 
     if (mindMapOutputs && mindMapOutputs.length > 0) {
       // Check which mind maps are already synced
@@ -576,7 +649,8 @@ export async function POST(req: NextRequest) {
 
         try {
           const payload = typeof mm.payload === 'string' ? JSON.parse(mm.payload) : mm.payload
-          const mindMapData: MindMapData | undefined = payload?.mindMapData
+          const content = typeof payload?.content === 'string' ? JSON.parse(payload.content) : payload?.content
+          const mindMapData: MindMapData | undefined = payload?.mindMapData || content
           if (!mindMapData?.branches) continue
 
           const syncPayload = buildMindMapSyncPayload(mm.id, mindMapData, mm.document_id)
@@ -643,9 +717,9 @@ export async function POST(req: NextRequest) {
       sourceTypes.set(c.source_type, existing)
     })
 
-    const flashcardSets = sourceTypes.get('flashcard')?.size || 0
-    const quizSets = sourceTypes.get('quiz')?.size || 0
-    const mindmapSets = sourceTypes.get('mindmap')?.size || 0
+    const flashcardSets = Math.max(sourceTypes.get('flashcard')?.size || 0, (generatedOutputs || []).filter((output) => output.type === 'flashcards').length)
+    const quizSets = Math.max(sourceTypes.get('quiz')?.size || 0, (generatedOutputs || []).filter((output) => output.type === 'quiz').length)
+    const mindmapSets = Math.max(sourceTypes.get('mindmap')?.size || 0, (generatedOutputs || []).filter((output) => output.type === 'mind_map').length)
 
     // Calculate days for the plan
     let daysCount = 14
@@ -654,20 +728,17 @@ export async function POST(req: NextRequest) {
     } else if (normalizedTimeline) {
       const targetDate = new Date(normalizedTimeline)
       if (!isNaN(targetDate.getTime())) {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
+        const today = new Date(`${dateKeyInTimeZone(new Date())}T00:00:00Z`)
         daysCount = Math.max(1, Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
       }
     }
     console.log(`[CreatePlan] Calculated daysCount=${daysCount} from timeline=${normalizedTimeline}, durationDays=${durationDays}`)
 
     // Build dates for the schedule
-    const today = new Date()
+    const todayKey = dateKeyInTimeZone(new Date())
     const dates: string[] = []
     for (let i = 0; i < daysCount; i++) {
-      const d = new Date(today)
-      d.setDate(d.getDate() + i)
-      dates.push(d.toISOString().split('T')[0])
+      dates.push(addDaysToDateKey(todayKey, i))
     }
 
     const documentSummary = documentContext.map((doc) => (
@@ -800,7 +871,7 @@ Generate the ${daysCount}-day study schedule as JSON. Remember: EXACTLY ${daysCo
       return NextResponse.json({ error: 'AI generated empty schedule' }, { status: 500 })
     }
 
-    let normalizedSchedule = normalizeSchedule(schedule, dates, planDocumentIds)
+    let normalizedSchedule = normalizeSchedule(schedule, dates, planDocumentIds, documentContext)
     normalizedSchedule = alignScheduleWithOnboarding(normalizedSchedule, {
       documentIds: planDocumentIds,
       goal: normalizedGoal,
@@ -808,6 +879,19 @@ Generate the ${daysCount}-day study schedule as JSON. Remember: EXACTLY ${daysCo
       currentUnderstanding: normalizedCurrentUnderstanding,
       totalCards,
     })
+    normalizedSchedule = normalizedSchedule.map((day) => ({
+      ...day,
+      activities: day.activities.map((activity) => {
+        const existingId = existingMaterialIds.get(activity.type as ExistingMaterialType)
+        if (!existingId || activity.type === 'review_due_cards') return activity
+        return {
+          ...activity,
+          generatedSourceId: activity.generatedSourceId || existingId,
+          sourceSetId: activity.sourceSetId || existingId,
+          generationStatus: 'ready' as const,
+        }
+      }),
+    }))
 
     const onboardingContext = {
       goal: normalizedGoal,
@@ -854,6 +938,111 @@ Generate the ${daysCount}-day study schedule as JSON. Remember: EXACTLY ${daysCo
     if (insertError) {
       console.error('[CreatePlan] Insert error:', insertError)
       return NextResponse.json({ error: 'Failed to save plan' }, { status: 500 })
+    }
+
+    const scheduledSourceIds = new Set(
+      normalizedSchedule.flatMap((day) =>
+        day.activities
+          .map((activity) => activity.generatedSourceId || activity.sourceSetId)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0)
+      )
+    )
+    const firstReviewAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    const now = new Date().toISOString()
+
+    for (const output of generatedOutputs || []) {
+      if (!scheduledSourceIds.has(output.id)) continue
+      const payload = typeof output.payload === 'string' ? JSON.parse(output.payload) : output.payload
+      try {
+        if (output.type === 'flashcards' && Array.isArray(payload?.cards)) {
+          for (const card of payload.cards) {
+            const { error: cardInsertError } = await supabase
+              .from('review_cards')
+              .upsert({
+                user_id: user.id,
+                source_type: 'flashcard',
+                source_id: String(card.id),
+                source_set_id: output.id,
+                document_id: output.document_id || null,
+                plan_id: plan.id,
+                question: card.question,
+                answer: card.answer,
+                topic: card.topic || null,
+                difficulty: normalizeDifficulty(card.difficulty),
+                next_review_at: firstReviewAt,
+              }, { onConflict: 'user_id,source_type,source_set_id,source_id', ignoreDuplicates: true })
+            if (cardInsertError) {
+              console.error(`[CreatePlan] Failed to sync flashcard ${card.id} from output ${output.id}:`, cardInsertError)
+            }
+          }
+          await supabase
+            .from('review_cards')
+            .update({ plan_id: plan.id })
+            .eq('user_id', user.id)
+            .eq('source_type', 'flashcard')
+            .eq('source_set_id', output.id)
+          await supabase
+            .from('review_cards')
+            .update({ next_review_at: firstReviewAt })
+            .eq('user_id', user.id)
+            .eq('source_type', 'flashcard')
+            .eq('source_set_id', output.id)
+            .eq('total_reviews', 0)
+            .lte('next_review_at', now)
+        } else if (output.type === 'quiz') {
+          const questions = Array.isArray(payload?.questions)
+            ? payload.questions
+            : typeof payload?.content === 'string'
+              ? JSON.parse(payload.content)
+              : Array.isArray(payload?.content) ? payload.content : []
+          for (const question of questions) {
+            const correctAnswer = typeof question.correctAnswer === 'number' ? question.correctAnswer : 0
+            const { error: quizInsertError } = await supabase
+              .from('review_cards')
+              .upsert({
+                user_id: user.id,
+                source_type: 'quiz',
+                source_id: String(question.id),
+                source_set_id: output.id,
+                document_id: output.document_id || null,
+                plan_id: plan.id,
+                question: question.question,
+                answer: `${question.options?.[correctAnswer] || question.answer || ''}${question.explanation ? `\n\n${question.explanation}` : ''}`,
+                options: Array.isArray(question.options) ? question.options : null,
+                correct_answer: correctAnswer,
+                topic: question.topic || null,
+                difficulty: normalizeDifficulty(question.difficulty),
+                next_review_at: firstReviewAt,
+              }, { onConflict: 'user_id,source_type,source_set_id,source_id', ignoreDuplicates: true })
+            if (quizInsertError) {
+              console.error(`[CreatePlan] Failed to sync quiz card ${question.id} from output ${output.id}:`, quizInsertError)
+            }
+          }
+          await supabase
+            .from('review_cards')
+            .update({ plan_id: plan.id })
+            .eq('user_id', user.id)
+            .eq('source_type', 'quiz')
+            .eq('source_set_id', output.id)
+          await supabase
+            .from('review_cards')
+            .update({ next_review_at: firstReviewAt })
+            .eq('user_id', user.id)
+            .eq('source_type', 'quiz')
+            .eq('source_set_id', output.id)
+            .eq('total_reviews', 0)
+            .lte('next_review_at', now)
+        } else if (output.type === 'mind_map') {
+          await supabase
+            .from('review_cards')
+            .update({ plan_id: plan.id })
+            .eq('user_id', user.id)
+            .eq('source_type', 'mindmap')
+            .eq('source_set_id', output.id)
+        }
+      } catch (syncError) {
+        console.error(`[CreatePlan] Failed to sync output ${output.id}:`, syncError)
+      }
     }
 
     return NextResponse.json({

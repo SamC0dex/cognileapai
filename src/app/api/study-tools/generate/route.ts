@@ -50,6 +50,29 @@ function repairTruncatedJsonArray(str: string): unknown[] | null {
   return null
 }
 
+type GeneratedFlashcard = {
+  id: string
+  question: string
+  answer: string
+  topic?: string
+  difficulty?: 'easy' | 'medium' | 'hard'
+}
+
+type GeneratedQuizQuestion = {
+  id: string
+  question: string
+  options: string[]
+  correctAnswer: number
+  explanation?: string
+  topic?: string
+  difficulty?: 'easy' | 'medium' | 'hard'
+  wrongExplanations?: string[]
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
 
 // Vercel Hobby (free) tier: 10s max for serverless functions
 // Pro tier allows up to 60s
@@ -484,6 +507,7 @@ interface StudyToolGenerateRequest {
   planId?: string
   planDay?: number
   activityIndex?: number
+  createNew?: boolean
   // Flashcard-specific options
   flashcardOptions?: {
     numberOfCards: 'fewer' | 'standard' | 'more'
@@ -528,6 +552,7 @@ async function syncGeneratedPlanActivity(params: {
   quizData: Array<{ id: string; question: string; options: string[]; correctAnswer: number; explanation?: string; topic?: string; difficulty?: 'easy' | 'medium' | 'hard' }> | null
 }) {
   const { userId, planId, planDay, activityIndex, outputId, type, documentId, flashcardData, quizData } = params
+  const firstReviewAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
   if (!planId || typeof planDay !== 'number' || typeof activityIndex !== 'number' || !outputId) return null
 
   const generatedSourceType =
@@ -573,6 +598,7 @@ async function syncGeneratedPlanActivity(params: {
       .select('source_id')
       .eq('user_id', userId)
       .eq('source_type', sourceType)
+      .eq('source_set_id', outputId)
       .in('source_id', sourceIds)
 
     if (existingFetchError) {
@@ -598,6 +624,7 @@ async function syncGeneratedPlanActivity(params: {
           correct_answer: card.correctAnswer,
           topic: card.topic,
           difficulty: card.difficulty,
+          next_review_at: firstReviewAt,
         })
       if (!error) synced++
     }
@@ -662,7 +689,8 @@ export async function POST(req: NextRequest) {
   let generationId: string | undefined
   let planId: string | undefined
   let planDay: number | undefined
-  let activityIndex: number | undefined
+    let activityIndex: number | undefined
+    let createNew = false
 
   try {
     // Authenticate user first
@@ -686,9 +714,10 @@ export async function POST(req: NextRequest) {
     flashcardOptions = requestData.flashcardOptions
     quizOptions = requestData.quizOptions
     mindMapOptions = requestData.mindMapOptions
-    planId = requestData.planId
-    planDay = requestData.planDay
-    activityIndex = requestData.activityIndex
+      planId = requestData.planId
+      planDay = requestData.planDay
+      activityIndex = requestData.activityIndex
+      createNew = requestData.createNew === true
 
     // Debug logging
     console.log('[StudyTools] API Request received:', { type, documentId, conversationId })
@@ -1068,8 +1097,8 @@ For each topic, read the source material and build a mind map that covers all th
 
     // Special handling for flashcards - parse JSON response
     let processedContent: string = resultText
-    let flashcardData = null
-    let quizData = null
+    let flashcardData: GeneratedFlashcard[] | null = null
+    let quizData: GeneratedQuizQuestion[] | null = null
     let mindMapData = null
 
     if (type === 'flashcards') {
@@ -1078,18 +1107,18 @@ For each topic, read the source material and build a mind map that covers all th
         const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
         const repaired = repairTruncatedJsonArray(cleanedText)
         if (!repaired) throw new Error('Flashcard JSON is malformed and could not be repaired')
-        flashcardData = repaired
-
-        if (!Array.isArray(flashcardData)) {
+        if (!Array.isArray(repaired)) {
           throw new Error('Flashcard data is not an array')
         }
 
         // Validate flashcard structure
-        flashcardData.forEach((card, index) => {
-          if (!card.question || !card.answer || !card.id) {
+        const validatedCards: GeneratedFlashcard[] = repaired.map((card, index) => {
+          if (!isRecord(card) || typeof card.question !== 'string' || typeof card.answer !== 'string' || typeof card.id !== 'string') {
             throw new Error(`Invalid flashcard at index ${index}: missing required fields`)
           }
+          return card as GeneratedFlashcard
         })
+        flashcardData = validatedCards
 
         console.log(`[StudyTools] Successfully parsed ${flashcardData.length} flashcards`)
 
@@ -1110,15 +1139,18 @@ For each topic, read the source material and build a mind map that covers all th
         const cleanedText = resultText.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '')
         const repaired = repairTruncatedJsonArray(cleanedText)
         if (!repaired) throw new Error('Quiz JSON is malformed and could not be repaired')
-        quizData = repaired
 
-        if (!Array.isArray(quizData)) {
+        if (!Array.isArray(repaired)) {
           throw new Error('Quiz data is not an array')
         }
 
         // Validate quiz structure
-        quizData.forEach((q: Record<string, unknown>, index: number) => {
-          if (!q.question || !q.id) {
+        const validatedQuestions: GeneratedQuizQuestion[] = repaired.map((item, index) => {
+          if (!isRecord(item)) {
+            throw new Error(`Invalid quiz question at index ${index}: question must be an object`)
+          }
+          const q = item
+          if (typeof q.question !== 'string' || typeof q.id !== 'string') {
             throw new Error(`Invalid quiz question at index ${index}: missing required fields`)
           }
           if (!Array.isArray(q.options) || (q.options as unknown[]).length !== 4) {
@@ -1134,7 +1166,9 @@ For each topic, read the source material and build a mind map that covers all th
           while ((q.wrongExplanations as string[]).length < 4) {
             (q.wrongExplanations as string[]).push('')
           }
+          return q as GeneratedQuizQuestion
         })
+        quizData = validatedQuestions
 
         console.log(`[StudyTools] Successfully parsed ${quizData.length} quiz questions`)
         processedContent = resultText
@@ -1347,7 +1381,7 @@ For each topic, read the source material and build a mind map that covers all th
         console.warn('[StudyTools] Existing output lookup error:', existingError)
       }
 
-      if (existingOutput?.id) {
+      if (!createNew && existingOutput?.id) {
         const { data: updatedOutput, error: updateError } = await serviceSupabase
           .from('outputs')
           .update({

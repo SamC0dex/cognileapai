@@ -62,7 +62,7 @@ const TOOLS = [
 
 export function DashboardActionCards() {
   const router = useRouter()
-  const { expandPanel, setHighlightedTool } = useStudyToolsStore()
+  const { setHighlightedTool } = useStudyToolsStore()
   const { totalDue, stats, fetchDueCards, fetchStats } = useActiveRecallStore()
 
   React.useEffect(() => {
@@ -73,8 +73,7 @@ export function DashboardActionCards() {
 
   const handleToolClick = (toolType: StudyToolType) => {
     setHighlightedTool(toolType)
-    expandPanel()
-    router.push('/chat')
+    window.dispatchEvent(new CustomEvent('expand-study-tools-panel'))
   }
 
   return (

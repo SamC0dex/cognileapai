@@ -95,6 +95,41 @@ function parseActions(text: string): { cleanText: string; actions: AgentAction[]
   return { cleanText: cleanText.trim(), actions }
 }
 
+function summarizeActionResult(action: AgentAction): string | null {
+  if (action.status !== 'done' || !action.result || typeof action.result !== 'object') return null
+
+  const result = action.result as Record<string, unknown>
+  if ('error' in result) return `${action.type} failed: ${String(result.error)}`
+
+  if (action.type === 'CHECK_TOOLS') {
+    const document = result.document as { title?: string } | undefined
+    const tools = result.tools as Record<string, { setCount?: number; cardCount?: number }> | undefined
+    if (!tools) return null
+    return [
+      `CHECK_TOOLS result for ${document?.title || 'selected document'}:`,
+      `study guides=${tools.studyGuides?.setCount || 0}`,
+      `summaries=${tools.summaries?.setCount || 0}`,
+      `smart notes=${tools.smartNotes?.setCount || 0}`,
+      `flashcards=${tools.flashcards?.setCount || 0} sets/${tools.flashcards?.cardCount || 0} cards`,
+      `quizzes=${tools.quizzes?.setCount || 0} sets/${tools.quizzes?.cardCount || 0} cards`,
+      `mind maps=${tools.mindmaps?.setCount || 0} sets/${tools.mindmaps?.cardCount || 0} cards`,
+    ].join(' ')
+  }
+
+  if (action.type === 'CREATE_PLAN') {
+    const plan = result.plan as { id?: string; title?: string; totalActivities?: number } | undefined
+    return plan ? `CREATE_PLAN result: created "${plan.title}" (id: ${plan.id}) with ${plan.totalActivities || 0} activities.` : null
+  }
+
+  if (action.type === 'GENERATE_TOOLS') {
+    const generated = result.generated as Array<{ type: string; success: boolean }> | undefined
+    if (!generated) return null
+    return `GENERATE_TOOLS result: ${generated.map((item) => `${item.type}=${item.success ? 'success' : 'failed'}`).join(', ')}.`
+  }
+
+  return `${action.type} result: ${JSON.stringify(result).slice(0, 500)}`
+}
+
 // ============================================
 // LocalStorage helpers
 // ============================================
@@ -245,7 +280,8 @@ const SUGGESTED_QUESTIONS = [
 function getCurrentPlanId(): string | null {
   if (typeof window === 'undefined') return null
   const match = window.location.pathname.match(/^\/active-recall\/plan\/([^/]+)/)
-  return match?.[1] || null
+  if (match?.[1]) return match[1]
+  return new URLSearchParams(window.location.search).get('plan_id')
 }
 
 async function getCurrentPlanContextForAgent(): Promise<string | null> {
@@ -328,7 +364,77 @@ function isReminderRequest(text: string): boolean {
   return ['remind', 'reminder', 'notification', 'notify', 'push'].some((word) => normalized.includes(word))
 }
 
-function isExplicitReviewStartRequest(text: string): boolean {
+function parseStudyPlanCreationRequest(text: string, selectedDocuments: Array<{ id: string; title?: string }>): Record<string, unknown> | null {
+  if (selectedDocuments.length === 0) return null
+  const normalized = text.toLowerCase()
+  const asksForPlan = /\b(create|make|build|generate)\b/.test(normalized) && /\b(plan|schedule)\b/.test(normalized)
+  const mentionsStudy = /\b(study|active recall|exam|prep|presentation)\b/.test(normalized)
+  if (!asksForPlan || !mentionsStudy) return null
+
+  const daysMatch = normalized.match(/\b(\d{1,2})\s*(?:day|days)\b/)
+  const minutesMatch = normalized.match(/\b(\d{1,3})\s*(?:minute|minutes|min|mins)\b/)
+  if (!daysMatch || !minutesMatch) return null
+
+  const durationDays = Math.max(1, Math.min(90, Number(daysMatch[1])))
+  const dailyAvailableMinutes = Math.max(10, Math.min(240, Number(minutesMatch[1])))
+  const preferredIntensity = normalized.includes('intensive')
+    ? 'intensive'
+    : normalized.includes('light')
+      ? 'light'
+      : 'standard'
+  const currentUnderstanding = normalized.includes('advanced')
+    ? 'advanced'
+    : normalized.includes('comfortable')
+      ? 'comfortable'
+      : normalized.includes('new')
+        ? 'new'
+        : 'some_exposure'
+  const goal = normalized.includes('exam') || normalized.includes('presentation')
+    ? 'exam_prep'
+    : normalized.includes('review')
+      ? 'review'
+      : 'understanding'
+
+  return {
+    title: `${durationDays}-Day ${preferredIntensity === 'intensive' ? 'Intensive ' : ''}${selectedDocuments[0].title || 'Study'} Plan`,
+    documentIds: selectedDocuments.map((doc) => doc.id),
+    goal,
+    durationDays,
+    dailyAvailableMinutes,
+    currentUnderstanding,
+    preferredIntensity,
+    priorKnowledge: currentUnderstanding === 'new' ? 'new' : currentUnderstanding === 'some_exposure' ? 'some_exposure' : 'refreshing',
+    notes: text.trim(),
+  }
+}
+
+function planActivityTypeForTool(toolType: string): string {
+  if (toolType === 'study-guide') return 'study_guide'
+  if (toolType === 'smart-summary') return 'summary'
+  if (toolType === 'smart-notes') return 'smart_notes'
+  if (toolType === 'mind-map') return 'mindmap'
+  return toolType
+}
+
+function generatedSourceTypeForTool(toolType: string): string {
+  if (toolType === 'flashcards') return 'flashcard_set'
+  if (toolType === 'quiz') return 'quiz_set'
+  if (toolType === 'mind-map') return 'mindmap_set'
+  return 'output'
+}
+
+function normalizeStudyToolType(toolType: string): string {
+  const normalized = toolType.trim().toLowerCase().replace(/_/g, '-')
+  if (normalized === 'summary' || normalized === 'smart-summary' || normalized === 'smart summary') return 'smart-summary'
+  if (normalized === 'notes' || normalized === 'smart-notes' || normalized === 'smart notes') return 'smart-notes'
+  if (normalized === 'guide' || normalized === 'study-guide' || normalized === 'study guide') return 'study-guide'
+  if (normalized === 'flashcard' || normalized === 'flashcards' || normalized === 'flashcard-set') return 'flashcards'
+  if (normalized === 'question-set' || normalized === 'practice-quiz' || normalized === 'quiz') return 'quiz'
+  if (normalized === 'mindmap' || normalized === 'mind-map' || normalized === 'mind map') return 'mind-map'
+  return normalized
+}
+
+  function isExplicitReviewStartRequest(text: string): boolean {
   const normalized = text.toLowerCase()
   return /\b(start|begin|launch|open|run|do)\b/.test(normalized)
     && /\b(review|review session|due cards|cards)\b/.test(normalized)
@@ -355,6 +461,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
   // Conversation management
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConvoId, setActiveConvoIdState] = useState<string | null>(null)
+  const activeConvoIdRef = useRef<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [legacyImportAvailable, setLegacyImportAvailable] = useState(false)
 
@@ -363,9 +470,10 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
 
   const setMessages = useCallback((updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setConversations((prev) => {
-      if (!activeConvoId) return prev
+      const targetConvoId = activeConvoIdRef.current
+      if (!targetConvoId) return prev
       return prev.map((c) => {
-        if (c.id !== activeConvoId) return c
+        if (c.id !== targetConvoId) return c
         const newMessages = typeof updater === 'function' ? updater(c.messages) : updater
         return {
           ...c,
@@ -375,9 +483,10 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
         }
       })
     })
-  }, [activeConvoId])
+  }, [])
 
   const switchConvo = useCallback((id: string | null) => {
+    activeConvoIdRef.current = id
     setActiveConvoIdState(id)
     setStoredActiveConvoId(userId, id)
     setShowHistory(false)
@@ -419,6 +528,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const handledPendingPromptIdsRef = useRef<Set<string>>(new Set())
 
   // Document selection from shared context
   const {
@@ -435,6 +545,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
   useEffect(() => {
     if (!userId) {
       setConversations([])
+      activeConvoIdRef.current = null
       setActiveConvoIdState(null)
       setShowHistory(false)
       setInput('')
@@ -446,9 +557,11 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
     setConversations(convos)
     setLegacyImportAvailable(hasLegacyConversations())
     const storedActiveId = getActiveConvoId(userId)
-    setActiveConvoIdState(storedActiveId && convos.some((c) => c.id === storedActiveId)
+    const nextActiveId = storedActiveId && convos.some((c) => c.id === storedActiveId)
       ? storedActiveId
-      : null)
+      : null
+    activeConvoIdRef.current = nextActiveId
+    setActiveConvoIdState(nextActiveId)
     setShowHistory(false)
   }, [userId])
 
@@ -514,10 +627,16 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
         }
 
         case 'GENERATE_TOOLS': {
-          const types = (action.payload.types as string[]) || ['flashcards']
+          const types = ((action.payload.types as string[]) || ['flashcards']).map(normalizeStudyToolType)
           const documentId = action.payload.documentId as string
           const topics = action.payload.topics as string[] | undefined
-          const results: Array<{ type: string; success: boolean; error?: string }> = []
+          const targetPlanId = action.payload.planId as string || getCurrentPlanId()
+          const targetDay = typeof action.payload.day === 'number'
+            ? action.payload.day as number
+            : typeof action.payload.planDay === 'number'
+              ? action.payload.planDay as number
+              : undefined
+          const results: Array<{ type: string; success: boolean; error?: string; id?: string; integrated?: boolean }> = []
 
           for (const toolType of types) {
             try {
@@ -525,6 +644,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
                 id: crypto.randomUUID(),
                 type: toolType,
                 documentId,
+                createNew: true,
               }
               // For mind maps with topics: pass them as batch in one request
               if (toolType === 'mind-map' && topics?.length) {
@@ -545,12 +665,13 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
               }
 
               const data = await res.json()
+              const generatedId = data.id || crypto.randomUUID()
 
               // Add generated content to the appropriate Zustand store so it appears in the Study Tools panel
               if (toolType === 'flashcards' && data.cards) {
                 const { useFlashcardStore } = await import('@/lib/flashcard-store')
                 useFlashcardStore.getState().addFlashcardSet({
-                  id: data.id || crypto.randomUUID(),
+                  id: generatedId,
                   title: data.title,
                   cards: data.cards,
                   options: data.options,
@@ -569,7 +690,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
               } else if (toolType === 'quiz' && data.questions) {
                 const { useQuizStore } = await import('@/lib/quiz-store')
                 useQuizStore.getState().addQuizSet({
-                  id: data.id || crypto.randomUUID(),
+                  id: generatedId,
                   title: data.title,
                   questions: data.questions,
                   options: data.options || { numberOfQuestions: 'standard', difficulty: 'medium' },
@@ -614,7 +735,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
                 } else {
                   // Single mind map
                   mindMapStore.addMindMapSet({
-                    id: data.id || crypto.randomUUID(),
+                    id: generatedId,
                     title: data.title,
                     mindMapData: data.mindMapData,
                     options: data.options || mindMapOptions,
@@ -638,7 +759,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
                 const studyToolsState = useStudyToolsStore.getState()
                 const generatedContent = studyToolsState.generatedContent
                 const newContent = {
-                  id: data.id || crypto.randomUUID(),
+                  id: generatedId,
                   type: toolType as StudyToolType,
                   title: data.title,
                   content: data.content,
@@ -650,7 +771,87 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
                 useStudyToolsStore.setState({ generatedContent: [newContent, ...generatedContent] })
               }
 
-              results.push({ type: toolType, success: true })
+              let integrated = false
+              if (targetPlanId) {
+                try {
+                  if (toolType === 'flashcards' && data.cards?.length) {
+                    await fetch('/api/active-recall/sync', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        sourceType: 'flashcard',
+                        sourceSetId: generatedId,
+                        documentId,
+                        planId: targetPlanId,
+                        firstReviewAfterDays: 1,
+                        cards: data.cards.map((card: { id: string; question: string; answer: string; topic?: string; difficulty?: string }) => ({
+                          id: card.id,
+                          question: card.question,
+                          answer: card.answer,
+                          topic: card.topic,
+                          difficulty: card.difficulty,
+                        })),
+                      }),
+                    }).catch(() => null)
+                  }
+
+                  if (toolType === 'quiz' && data.questions?.length) {
+                    await fetch('/api/active-recall/sync', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        sourceType: 'quiz',
+                        sourceSetId: generatedId,
+                        documentId,
+                        planId: targetPlanId,
+                        firstReviewAfterDays: 1,
+                        cards: data.questions.map((question: { id: string; question: string; options: string[]; correctAnswer: number; explanation?: string; topic?: string; difficulty?: string }) => ({
+                          id: question.id,
+                          question: question.question,
+                          answer: `${question.options[question.correctAnswer]}${question.explanation ? `\n\n${question.explanation}` : ''}`,
+                          options: question.options,
+                          correctAnswer: question.correctAnswer,
+                          topic: question.topic,
+                          difficulty: question.difficulty,
+                        })),
+                      }),
+                    }).catch(() => null)
+                  }
+
+                  if (toolType === 'mind-map') {
+                    await fetch('/api/active-recall/agent/sync-mindmap', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ mindMapSetId: generatedId, planId: targetPlanId }),
+                    }).catch(() => null)
+                  }
+
+                  const activityRes = await fetch(`/api/active-recall/agent/plans/${targetPlanId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      action: 'add_activity',
+                      day: targetDay,
+                      type: planActivityTypeForTool(toolType),
+                      topic: action.payload.topic as string || topics?.[0] || data.title || 'Agent requested material',
+                      documentId,
+                      generatedSourceId: generatedId,
+                      generatedSourceType: generatedSourceTypeForTool(toolType),
+                      cardCount: Array.isArray(data.cards)
+                        ? data.cards.length
+                        : Array.isArray(data.questions)
+                          ? data.questions.length
+                          : data.metadata?.totalNodes,
+                      notes: action.payload.instructions as string || 'Created and inserted by Study Agent.',
+                    }),
+                  })
+                  integrated = activityRes.ok
+                } catch {
+                  integrated = false
+                }
+              }
+
+              results.push({ type: toolType, success: true, id: generatedId, integrated })
             } catch (err) {
               const msg = err instanceof Error ? err.message : 'Request failed'
               results.push({ type: toolType, success: false, error: msg })
@@ -702,7 +903,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(60000), // 60s timeout for AI generation
+            signal: AbortSignal.timeout(180000), // Plan creation can exceed 60s on large documents/providers.
           })
           result = res.ok ? await res.json() : { error: `Failed to create plan (${res.status})` }
           break
@@ -847,6 +1048,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
         updatedAt: new Date().toISOString(),
       }
       setConversations((prev) => [newConvo, ...prev])
+      activeConvoIdRef.current = newConvo.id
       setActiveConvoIdState(newConvo.id)
       setStoredActiveConvoId(userId, newConvo.id)
       currentConvoId = newConvo.id
@@ -879,6 +1081,30 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
           id: assistantId,
           role: 'assistant',
           content: 'I will adapt the upcoming study days based on your request. Today and completed work will stay unchanged.',
+          timestamp: new Date().toISOString(),
+          actions: [action],
+        },
+      ])
+      handleAgentAction(action, assistantId)
+      return
+    }
+
+    const planCreationPayload = parseStudyPlanCreationRequest(text, selectedDocuments)
+    if (planCreationPayload) {
+      const assistantId = crypto.randomUUID()
+      const action: AgentAction = {
+        id: `action-0-${Date.now()}`,
+        type: 'CREATE_PLAN',
+        payload: planCreationPayload,
+        status: 'pending',
+      }
+
+      setMessages([
+        ...updatedMessages,
+        {
+          id: assistantId,
+          role: 'assistant',
+          content: 'I have enough details to create the study plan now. I will use the selected document, existing generated materials, and schedule the next 3 days from today.',
           timestamp: new Date().toISOString(),
           actions: [action],
         },
@@ -932,6 +1158,10 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
 
       const apiMessages = updatedMessages.map((m, idx) => {
         let content = m.content
+        const actionSummaries = m.actions?.map(summarizeActionResult).filter(Boolean) as string[] | undefined
+        if (actionSummaries?.length) {
+          content += `\n\n[Previous action results]\n${actionSummaries.join('\n')}`
+        }
         if (idx === 0 && m.role === 'user') {
           const contextParts: string[] = []
           if (selectedDocuments.length > 0) {
@@ -1060,6 +1290,8 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
 
   useEffect(() => {
     if (!isOpen || !pendingPrompt) return
+    if (handledPendingPromptIdsRef.current.has(pendingPrompt.id)) return
+    handledPendingPromptIdsRef.current.add(pendingPrompt.id)
     if (pendingPrompt.autoSend) {
       void sendMessage(pendingPrompt.text)
     } else {
@@ -1142,7 +1374,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
             'transition'
           )}
         >
-          <Sparkles className="h-5 w-5" />
+          <Bot className="h-5 w-5" />
           <span className="text-sm font-medium">Study Agent</span>
         </button>
       )}
@@ -1191,7 +1423,7 @@ export function AIChatSidebar({ isOpen, onToggle, pendingPrompt, onPendingPrompt
                   ) : (
                     <>
                       <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10">
-                        <Sparkles className="h-4 w-4 text-primary" />
+                        <Bot className="h-4 w-4 text-primary" />
                       </div>
                       <div>
                         <h3 className="text-sm font-semibold">Study Agent</h3>
@@ -1788,6 +2020,9 @@ function ActionResult({ action }: { action: AgentAction }) {
       if (!tools) return null
       return (
         <div className="mt-2 grid grid-cols-3 gap-1.5">
+          <ToolCountBadge icon={<FileText className="h-3 w-3" />} label="Guides" count={tools.studyGuides?.setCount || 0} cardCount={tools.studyGuides?.cardCount || 0} />
+          <ToolCountBadge icon={<FileText className="h-3 w-3" />} label="Summaries" count={tools.summaries?.setCount || 0} cardCount={tools.summaries?.cardCount || 0} />
+          <ToolCountBadge icon={<FileText className="h-3 w-3" />} label="Notes" count={tools.smartNotes?.setCount || 0} cardCount={tools.smartNotes?.cardCount || 0} />
           <ToolCountBadge icon={<FileText className="h-3 w-3" />} label="Flashcards" count={tools.flashcards?.setCount || 0} cardCount={tools.flashcards?.cardCount || 0} />
           <ToolCountBadge icon={<FlaskConical className="h-3 w-3" />} label="Quizzes" count={tools.quizzes?.setCount || 0} cardCount={tools.quizzes?.cardCount || 0} />
           <ToolCountBadge icon={<TreePine className="h-3 w-3" />} label="Mind Maps" count={tools.mindmaps?.setCount || 0} cardCount={tools.mindmaps?.cardCount || 0} />

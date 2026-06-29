@@ -280,6 +280,10 @@ function isGenerationNeeded(activity: PlanActivity): boolean {
   return !activity.generatedSourceId && !!studyToolTypeForActivity(activity.type)
 }
 
+function isPlanDisplayActivity(activity: PlanActivity): boolean {
+  return activity.type !== 'review_due_cards'
+}
+
 function isActivityComplete(activity: Pick<PlanActivity, 'completed' | 'completionStatus'>): boolean {
   return !!activity.completed || activity.completionStatus === 'completed'
 }
@@ -521,6 +525,9 @@ export default function PlanDetailPage() {
     completionStatus: PlanActivity['completionStatus'],
     options?: { sessionId?: string | null; durationMs?: number },
   ) => {
+    const safeDurationMs = typeof options?.durationMs === 'number' && Number.isFinite(options.durationMs)
+      ? Math.max(0, Math.round(options.durationMs))
+      : 0
     setPlan((current) => {
       if (!current) return current
       let completedDelta = 0
@@ -545,6 +552,12 @@ export default function PlanDetailPage() {
         completed_activities: Math.max(0, (current.completed_activities || 0) + completedDelta),
       }
     })
+    if (completionStatus === 'completed' && safeDurationMs > 0) {
+      setStats((current) => current
+        ? { ...current, totalActivityTimeMs: (current.totalActivityTimeMs || 0) + safeDurationMs }
+        : current
+      )
+    }
 
     const response = await fetch(`/api/active-recall/agent/plans/${id}`, {
       method: 'PATCH',
@@ -555,7 +568,7 @@ export default function PlanDetailPage() {
         activityIndex,
         completionStatus,
         sessionId: options?.sessionId,
-        durationMs: options?.durationMs,
+        durationMs: safeDurationMs,
       }),
     })
 
@@ -606,14 +619,19 @@ export default function PlanDetailPage() {
       if (!isActivityComplete(activity) && activity.completionStatus !== 'in_progress') {
         await patchActivityCompletion(day, activityIndex, 'in_progress')
       }
-      window.dispatchEvent(new Event('expand-study-tools-panel'))
-
       const toolType = studyToolTypeForActivity(activity.type)
       if (toolType === 'quiz' || toolType === 'mind-map' || toolType === 'flashcards') {
         if (!activity.generatedSourceId) {
           throw new Error('The generated study material is not available yet.')
         }
+        if (toolType === 'quiz' || toolType === 'flashcards') {
+          const sourceType = toolType === 'quiz' ? 'quiz' : 'flashcard'
+          window.dispatchEvent(new Event('collapse-study-tools-panel'))
+          handleStartSession(sourceType, true, activity.generatedSourceId)
+          return
+        }
         enqueueAutoOpen(activity.generatedSourceId, toolType)
+        window.dispatchEvent(new Event('expand-study-tools-panel'))
         return
       }
 
@@ -623,6 +641,7 @@ export default function PlanDetailPage() {
         throw new Error('The generated study material is not available yet.')
       }
 
+      window.dispatchEvent(new Event('expand-study-tools-panel'))
       await openCanvas(output)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not open the study material.')
@@ -649,7 +668,7 @@ export default function PlanDetailPage() {
     }
 
     if (nextActivity.type === 'review_due_cards') {
-      handleStartSession()
+      handleStartSession(undefined, undefined, undefined, 'deadline')
     }
   }
 
@@ -739,6 +758,7 @@ export default function PlanDetailPage() {
           sourceSetId: result.id,
           documentId: activity.documentId,
           planId: id,
+          firstReviewAfterDays: 1,
           cards: result.cards.map((card) => ({
             id: card.id,
             question: card.question,
@@ -760,6 +780,7 @@ export default function PlanDetailPage() {
           sourceSetId: result.id,
           documentId: activity.documentId,
           planId: id,
+          firstReviewAfterDays: 1,
           cards: result.questions.map((question) => ({
             id: question.id,
             question: question.question,
@@ -851,10 +872,12 @@ export default function PlanDetailPage() {
     }
   }
 
-  const handleStartSession = (sourceType?: string, includeAll?: boolean) => {
+  const handleStartSession = (sourceType?: string, includeAll?: boolean, sourceSetId?: string, reviewMode?: string) => {
     let url = `/active-recall/review?plan_id=${id}`
     if (sourceType) url += `&source_type=${sourceType}`
     if (includeAll) url += `&include_all=true`
+    if (sourceSetId) url += `&source_set_id=${sourceSetId}`
+    if (reviewMode) url += `&review_mode=${reviewMode}`
     router.push(url)
   }
 
@@ -876,7 +899,7 @@ export default function PlanDetailPage() {
     }
 
     if (activity.type === 'review_due_cards') {
-      handleStartSession()
+      handleStartSession(undefined, undefined, undefined, 'deadline')
     }
   }
 
@@ -908,13 +931,16 @@ export default function PlanDetailPage() {
     )
   }
 
-  const progress = plan.total_activities > 0
-    ? Math.round((plan.completed_activities / plan.total_activities) * 100)
+  const displayActivities = plan.schedule.flatMap((day) => day.activities.filter(isPlanDisplayActivity))
+  const displayCompletedActivities = displayActivities.filter(isActivityComplete).length
+  const displayTotalActivities = displayActivities.length
+  const progress = displayTotalActivities > 0
+    ? Math.round((displayCompletedActivities / displayTotalActivities) * 100)
     : 0
   const displayDay = Math.min(plan.currentDay, plan.totalDays || plan.currentDay)
   const daysRemaining = Math.max(0, plan.totalDays - displayDay)
   const todayDay = plan.schedule.find((day) => day.day === displayDay) || null
-  const nextTodayActivityIndex = todayDay?.activities.findIndex((activity) => !isActivityComplete(activity)) ?? -1
+  const nextTodayActivityIndex = todayDay?.activities.findIndex((activity) => isPlanDisplayActivity(activity) && !isActivityComplete(activity)) ?? -1
   const nextTodayActivity = nextTodayActivityIndex >= 0 ? todayDay?.activities[nextTodayActivityIndex] ?? null : null
   const canContinuePlan = !!nextTodayActivity || (stats?.dueCards || 0) > 0
   const trackedStudyMinutes = stats?.totalActivityTimeMs
@@ -982,7 +1008,7 @@ export default function PlanDetailPage() {
               </span>
               <span className="flex items-center gap-1">
                 <Target className="h-3 w-3" />
-                {plan.completed_activities}/{plan.total_activities} activities
+                {displayCompletedActivities}/{displayTotalActivities} activities
               </span>
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
@@ -1065,14 +1091,16 @@ export default function PlanDetailPage() {
         {todayDay ? (
           <div className="space-y-2">
             {todayDay.activities.map((activity, idx) => (
-              <ActivityRow
-                key={idx}
-                activity={activity}
-                onComplete={() => handleToggleActivity(todayDay.day, idx)}
-                onCompleteStudy={() => handleCompleteStudyActivity(todayDay.day, idx, true)}
-                onGenerate={() => handleGenerateActivity(todayDay.day, idx)}
-                onStudy={() => handleOpenStudyActivity(todayDay.day, idx)}
-              />
+              isPlanDisplayActivity(activity) ? (
+                <ActivityRow
+                  key={idx}
+                  activity={activity}
+                  onComplete={() => handleToggleActivity(todayDay.day, idx)}
+                  onCompleteStudy={() => handleCompleteStudyActivity(todayDay.day, idx, true)}
+                  onGenerate={() => handleGenerateActivity(todayDay.day, idx)}
+                  onStudy={() => handleOpenStudyActivity(todayDay.day, idx)}
+                />
+              ) : null
             ))}
           </div>
         ) : (
@@ -1146,8 +1174,9 @@ export default function PlanDetailPage() {
             const isToday = day.day === plan.currentDay
             const isPast = day.day < plan.currentDay
             const isExpanded = expandedDays.has(day.day)
-            const completedCount = day.activities.filter(isActivityComplete).length
-            const totalCount = day.activities.length
+            const visibleActivities = day.activities.filter(isPlanDisplayActivity)
+            const completedCount = visibleActivities.filter(isActivityComplete).length
+            const totalCount = visibleActivities.length
             return (
               <div
                 key={day.day}
@@ -1195,7 +1224,7 @@ export default function PlanDetailPage() {
                   {/* Activity type pills preview when collapsed */}
                   {!isExpanded && (
                     <div className="flex items-center gap-1 mr-2">
-                      {day.activities.map((a, i) => {
+                      {visibleActivities.map((a, i) => {
                         const config = ACTIVITY_CONFIG[a.type]
                         return config ? (
                           <span key={i} className={cn('p-1 rounded', config.color)}>
@@ -1225,18 +1254,20 @@ export default function PlanDetailPage() {
                     >
                       <div className="px-3.5 pb-3.5 space-y-2 ml-7">
                         {day.activities.map((activity, idx) => (
-                          <ActivityRow
-                            key={idx}
-                            activity={activity}
-                            onComplete={() => handleToggleActivity(day.day, idx)}
-                            onCompleteStudy={() => handleCompleteStudyActivity(day.day, idx, isToday)}
-                            onGenerate={() => handleGenerateActivity(day.day, idx)}
-                            onStudy={() => handleOpenStudyActivity(day.day, idx)}
-                          />
+                          isPlanDisplayActivity(activity) ? (
+                            <ActivityRow
+                              key={idx}
+                              activity={activity}
+                              onComplete={() => handleToggleActivity(day.day, idx)}
+                              onCompleteStudy={() => handleCompleteStudyActivity(day.day, idx, isToday)}
+                              onGenerate={() => handleGenerateActivity(day.day, idx)}
+                              onStudy={() => handleOpenStudyActivity(day.day, idx)}
+                            />
+                          ) : null
                         ))}
 
                         {/* Start day's session */}
-                        {isToday && canContinuePlan && day.activities.some(a => !isActivityComplete(a)) && (
+                        {isToday && canContinuePlan && visibleActivities.some(a => !isActivityComplete(a)) && (
                           <Button
                             onClick={() => { void handleContinuePlan() }}
                             variant="outline"

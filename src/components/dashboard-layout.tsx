@@ -5,6 +5,7 @@ import { useState, useRef } from 'react'
 import { Sidebar } from '@/components/sidebar'
 import { FilesPanel } from '@/components/files-panel'
 import { StudyToolsSidebarPanel } from '@/components/study-tools-sidebar-panel'
+import { AIChatSidebar } from '@/components/active-recall/v2/ai-chat-sidebar'
 import { DocumentsProvider } from '@/contexts/documents-context'
 
 const FILES_PANEL_STATE_KEY = 'cognileap-files-panel-open'
@@ -18,6 +19,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   // Always start with false to match SSR, then hydrate from localStorage
   const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false)
   const [isStudyToolsPanelOpen, setIsStudyToolsPanelOpen] = useState(false)
+  const [isStudyAgentOpen, setIsStudyAgentOpen] = useState(false)
+  const [pendingStudyAgentPrompt, setPendingStudyAgentPrompt] = useState<{ id: string; text: string; autoSend?: boolean } | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [filesPanelWidth, setFilesPanelWidth] = useState(0)
   const [studyToolsPanelWidth, setStudyToolsPanelWidth] = useState(0)
@@ -81,13 +84,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     setSidebarCollapsed(newCollapsedState)
   }, [])
 
-  // Shift content when floating panels are visible (both can be open)
-  const getMainContentOffset = () => {
-    let offset = 0
-    if (isFilesPanelOpen) offset += filesPanelWidth
-    if (isStudyToolsPanelOpen) offset += studyToolsPanelWidth
-    return offset
-  }
+  // Panels are fixed overlays. Keep the dashboard width stable while panels open.
+  const getMainContentOffset = () => 0
 
   // Track widths in refs for real-time DOM updates during drag
   const isResizingRef = useRef(false)
@@ -97,8 +95,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   // Update combined margin on main content + reposition study tools panel
   const updateMainMargin = React.useCallback(() => {
     if (mainRef.current) {
-      const total = filesPanelWidthRef.current + studyToolsPanelWidthRef.current
-      mainRef.current.style.marginLeft = `${total}px`
+      mainRef.current.style.marginLeft = '0px'
     }
     // Also reposition the study tools panel in real-time during files panel drag
     if (studyToolsPanelRef.current) {
@@ -180,12 +177,37 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         handleStudyToolsPanelToggle()
       }
     }
+    const handleCollapseStudyToolsPanel = () => {
+      setIsStudyToolsPanelOpen(false)
+    }
 
     if (typeof window !== 'undefined') {
       window.addEventListener('expand-study-tools-panel', handleExpandStudyToolsPanel)
-      return () => window.removeEventListener('expand-study-tools-panel', handleExpandStudyToolsPanel)
+      window.addEventListener('collapse-study-tools-panel', handleCollapseStudyToolsPanel)
+      return () => {
+        window.removeEventListener('expand-study-tools-panel', handleExpandStudyToolsPanel)
+        window.removeEventListener('collapse-study-tools-panel', handleCollapseStudyToolsPanel)
+      }
     }
   }, [isStudyToolsPanelOpen, handleStudyToolsPanelToggle])
+
+  const handleOpenStudyAgent = React.useCallback((event?: Event) => {
+    const detail = (event as CustomEvent<{ prompt?: string; autoSend?: boolean }> | undefined)?.detail
+    if (detail?.prompt) {
+      setPendingStudyAgentPrompt({
+        id: crypto.randomUUID(),
+        text: detail.prompt,
+        autoSend: detail.autoSend,
+      })
+    }
+    setIsStudyAgentOpen(true)
+  }, [])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.addEventListener('open-study-agent', handleOpenStudyAgent)
+    return () => window.removeEventListener('open-study-agent', handleOpenStudyAgent)
+  }, [handleOpenStudyAgent])
 
   return (
     <DocumentsProvider>
@@ -233,6 +255,13 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
           onWidthChange={handleStudyToolsPanelWidthChange}
           onResizing={handleStudyToolsPanelResizing}
           extraLeftOffset={isFilesPanelOpen ? filesPanelWidth : 0}
+        />
+
+        <AIChatSidebar
+          isOpen={isStudyAgentOpen}
+          onToggle={() => setIsStudyAgentOpen((prev) => !prev)}
+          pendingPrompt={pendingStudyAgentPrompt}
+          onPendingPromptHandled={() => setPendingStudyAgentPrompt(null)}
         />
       </div>
     </DocumentsProvider>

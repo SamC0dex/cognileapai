@@ -11,8 +11,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body: SyncRequest & { planId?: string } = await req.json()
+    const body: SyncRequest & { planId?: string; firstReviewAfterDays?: number } = await req.json()
     const { sourceType, sourceSetId, documentId, cards, planId } = body
+    const firstReviewAfterDays = typeof body.firstReviewAfterDays === 'number' && Number.isFinite(body.firstReviewAfterDays)
+      ? Math.max(0, Math.min(30, body.firstReviewAfterDays))
+      : 1
+    const firstReviewAt = new Date(Date.now() + firstReviewAfterDays * 24 * 60 * 60 * 1000).toISOString()
 
     if (!sourceType || !sourceSetId || !cards?.length) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
@@ -61,6 +65,7 @@ export async function POST(req: NextRequest) {
           correct_answer: card.correctAnswer ?? null,
           topic: card.topic || null,
           difficulty: card.difficulty || null,
+          next_review_at: firstReviewAt,
         }, {
           onConflict: 'user_id,source_type,source_set_id,source_id',
           ignoreDuplicates: true,

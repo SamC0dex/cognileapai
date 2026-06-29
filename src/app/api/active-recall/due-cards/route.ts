@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
     const documentId = searchParams.get('document_id')
     const layer = searchParams.get('layer')
     const planId = searchParams.get('plan_id')
+    const sourceSetId = searchParams.get('source_set_id')
     const sourceType = searchParams.get('source_type')
+    const reviewMode = searchParams.get('review_mode')
     const progressive = searchParams.get('progressive') === 'true'
     const includeAll = searchParams.get('include_all') === 'true'
     const includeUnplanned = searchParams.get('include_unplanned') === 'true'
@@ -33,7 +35,9 @@ export async function GET(req: NextRequest) {
       .order('next_review_at', { ascending: true })
       .limit(limit)
 
-    if (!includeAll) {
+    const includeScheduledPlanCards = includeAll || reviewMode === 'deadline'
+
+    if (!includeScheduledPlanCards) {
       query = query.lte('next_review_at', new Date().toISOString())
     }
 
@@ -50,6 +54,9 @@ export async function GET(req: NextRequest) {
     }
     if (sourceType) {
       query = query.eq('source_type', sourceType)
+    }
+    if (sourceSetId) {
+      query = query.eq('source_set_id', sourceSetId)
     }
 
     const { data: rawCards, error } = await query
@@ -79,7 +86,7 @@ export async function GET(req: NextRequest) {
       .select('*', { count: 'exact', head: true })
       .eq('user_id', user.id)
 
-    if (!includeAll) {
+    if (!includeScheduledPlanCards) {
       countQuery = countQuery.lte('next_review_at', new Date().toISOString())
     }
 
@@ -93,6 +100,9 @@ export async function GET(req: NextRequest) {
     }
     if (sourceType) {
       countQuery = countQuery.eq('source_type', sourceType)
+    }
+    if (sourceSetId) {
+      countQuery = countQuery.eq('source_set_id', sourceSetId)
     }
 
     const { count: totalDue } = await countQuery

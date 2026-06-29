@@ -4,6 +4,14 @@ import { routedCompletion } from '@/lib/ai-router'
 import { recordUsage } from '@/lib/usage-tracker'
 import type { ChatMessage } from '@/lib/ai-providers'
 
+function sanitizeFeedback(text: string, accuracy: number) {
+  if (accuracy >= 100) return text.trim()
+  return text
+    .replace(/\bperfect\b/gi, accuracy >= 95 ? 'excellent' : 'strong')
+    .replace(/\bflawless\b/gi, accuracy >= 95 ? 'excellent' : 'solid')
+    .trim()
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient()
@@ -42,7 +50,12 @@ export async function POST(req: NextRequest) {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: `You are a supportive study coach giving brief post-session feedback. Be specific, warm, and actionable. Keep it to 2-3 sentences. No emojis.`
+        content: `You are a supportive study coach giving brief post-session feedback. Be specific, warm, and actionable. Keep it to 2-3 sentences. No emojis.
+
+Accuracy wording rules:
+- Only use "perfect", "flawless", or "all correct" when accuracy is exactly 100% and demotions is 0.
+- If accuracy is below 100%, acknowledge the exact accuracy and mention there is still room to tighten weak items.
+- Do not say every card was mastered unless cards needing more work is 0.`
       },
       {
         role: 'user',
@@ -69,7 +82,7 @@ Give a brief, personalized coaching message about this session.`
       recordUsage({ userId: user.id, provider: config.provider, model: config.model, inputTokens: usage.promptTokens, outputTokens: usage.completionTokens, totalTokens: usage.totalTokens, source: 'active-recall' })
     }
 
-    return NextResponse.json({ feedback: text.trim() })
+    return NextResponse.json({ feedback: sanitizeFeedback(text, Number(accuracy) || 0) })
   } catch (error) {
     console.error('[SessionFeedback] Error:', error)
     return NextResponse.json({

@@ -39,14 +39,18 @@ function GlobalErrorHandler() {
     if (typeof window === 'undefined') return
 
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('Unhandled promise rejection:', event.reason)
+      if (event.reason) {
+        console.warn('Unhandled promise rejection:', event.reason)
+      }
 
       // You could show a toast here for critical errors
       // For now, we'll just log it - the specific components will handle their own errors
     }
 
     const handleError = (event: ErrorEvent) => {
-      console.error('Global error:', event.error)
+      if (event.error) {
+        console.warn('Global error:', event.error)
+      }
 
       // Handle global JavaScript errors
       // For now, we'll just log it - the specific components will handle their own errors

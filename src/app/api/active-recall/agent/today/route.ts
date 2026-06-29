@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getCalendarPlanDay } from '@/lib/active-recall-plan-day'
+import { normalizePlanDisplaySchedule } from '@/lib/active-recall-plan-display'
 
 export async function GET(req: NextRequest) {
   try {
@@ -31,9 +32,23 @@ export async function GET(req: NextRequest) {
     }
 
     // Parse schedule
-    const schedule = typeof plan.schedule === 'string'
+    const rawSchedule = typeof plan.schedule === 'string'
       ? JSON.parse(plan.schedule)
       : plan.schedule
+    const { data: allPlanCards } = await supabase
+      .from('review_cards')
+      .select('source_set_id')
+      .eq('user_id', user.id)
+      .eq('plan_id', planId)
+
+    const cardCountsBySourceSet: Record<string, number> = {}
+    allPlanCards?.forEach((card) => {
+      if (card.source_set_id) {
+        cardCountsBySourceSet[card.source_set_id] = (cardCountsBySourceSet[card.source_set_id] || 0) + 1
+      }
+    })
+
+    const schedule = normalizePlanDisplaySchedule(rawSchedule, plan.onboarding_context, cardCountsBySourceSet)
 
     const displayCurrentDay = getCalendarPlanDay(schedule, plan.created_at)
 

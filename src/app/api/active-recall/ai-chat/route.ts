@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     // Gather learning context for the system prompt
     const now = new Date().toISOString()
 
-    const [cardsResult, streakResult, sessionsResult, examsResult, documentsResult, plansResult] = await Promise.all([
+    const [cardsResult, streakResult, sessionsResult, examsResult, documentsResult, plansResult, outputsResult] = await Promise.all([
       supabase
         .from('review_cards')
         .select('topic, recall_layer, next_review_at, correct_reviews, total_reviews, document_id, source_type, source_set_id')
@@ -69,6 +69,10 @@ export async function POST(req: NextRequest) {
         .select('id, title, status, current_day, total_activities, completed_activities, created_at, schedule')
         .eq('user_id', user.id)
         .in('status', ['active', 'paused']),
+      supabase
+        .from('outputs')
+        .select('id, document_id, type')
+        .in('type', ['study_guide', 'summary', 'notes', 'flashcards', 'quiz', 'mind_map']),
     ])
 
     const allCards = cardsResult.data || []
@@ -127,11 +131,21 @@ export async function POST(req: NextRequest) {
     let systemPrompt: string
 
     if (agentMode !== false) {
-      // Build document tool counts from review_cards
-      const docToolCounts = new Map<string, { flashcardSets: Set<string>; quizSets: Set<string>; mindmapSets: Set<string> }>()
+      // Build document tool counts from both review cards and generated outputs.
+      const docToolCounts = new Map<string, {
+        studyGuides: Set<string>
+        summaries: Set<string>
+        smartNotes: Set<string>
+        flashcardSets: Set<string>
+        quizSets: Set<string>
+        mindmapSets: Set<string>
+      }>()
       allCards.forEach((c) => {
         if (!c.document_id) return
         const existing = docToolCounts.get(c.document_id) || {
+          studyGuides: new Set<string>(),
+          summaries: new Set<string>(),
+          smartNotes: new Set<string>(),
           flashcardSets: new Set<string>(),
           quizSets: new Set<string>(),
           mindmapSets: new Set<string>(),
@@ -141,12 +155,33 @@ export async function POST(req: NextRequest) {
         else if (c.source_type === 'mindmap') existing.mindmapSets.add(c.source_set_id)
         docToolCounts.set(c.document_id, existing)
       })
+      ;(outputsResult.data || []).forEach((output) => {
+        if (!output.document_id) return
+        const existing = docToolCounts.get(output.document_id) || {
+          studyGuides: new Set<string>(),
+          summaries: new Set<string>(),
+          smartNotes: new Set<string>(),
+          flashcardSets: new Set<string>(),
+          quizSets: new Set<string>(),
+          mindmapSets: new Set<string>(),
+        }
+        if (output.type === 'study_guide') existing.studyGuides.add(output.id)
+        else if (output.type === 'summary') existing.summaries.add(output.id)
+        else if (output.type === 'notes') existing.smartNotes.add(output.id)
+        else if (output.type === 'flashcards') existing.flashcardSets.add(output.id)
+        else if (output.type === 'quiz') existing.quizSets.add(output.id)
+        else if (output.type === 'mind_map') existing.mindmapSets.add(output.id)
+        docToolCounts.set(output.document_id, existing)
+      })
 
       const documents = (documentsResult.data || []).map((d) => {
         const tools = docToolCounts.get(d.id)
         return {
           id: d.id,
           title: d.title,
+          studyGuideCount: tools?.studyGuides.size || 0,
+          summaryCount: tools?.summaries.size || 0,
+          smartNotesCount: tools?.smartNotes.size || 0,
           flashcardCount: tools?.flashcardSets.size || 0,
           quizCount: tools?.quizSets.size || 0,
           mindmapCount: tools?.mindmapSets.size || 0,

@@ -222,7 +222,16 @@ export interface PlanPerformance {
 }
 
 export interface AgentContext extends AIChatContext {
-  documents: { id: string; title: string; flashcardCount: number; quizCount: number; mindmapCount: number }[]
+  documents: {
+    id: string
+    title: string
+    studyGuideCount: number
+    summaryCount: number
+    smartNotesCount: number
+    flashcardCount: number
+    quizCount: number
+    mindmapCount: number
+  }[]
   activePlans: { id: string; title: string; status: string; currentDay: number; totalActivities: number; completedActivities: number }[]
   planPerformance?: PlanPerformance[]
 }
@@ -230,7 +239,7 @@ export interface AgentContext extends AIChatContext {
 export function buildAgentSystemPrompt(ctx: AgentContext): string {
   const docList = ctx.documents.length > 0
     ? ctx.documents.map((d) =>
-      `  - "${d.title}" (id: ${d.id}) — ${d.flashcardCount} flashcard sets, ${d.quizCount} quiz sets, ${d.mindmapCount} mind maps`
+      `  - "${d.title}" (id: ${d.id}) — ${d.studyGuideCount} study guides, ${d.summaryCount} summaries, ${d.smartNotesCount} smart notes, ${d.flashcardCount} flashcard sets, ${d.quizCount} quiz sets, ${d.mindmapCount} mind maps`
     ).join('\n')
     : '  (No documents uploaded yet)'
 
@@ -282,8 +291,8 @@ Available actions:
    Use this when the student mentions a document and you want to see what study tools already exist.
 
 2. **Generate new study tools:**
-   <!--ACTION:GENERATE_TOOLS:{"documentId":"<uuid>","types":["flashcards","quiz","mind-map"]}-->
-   Use this when the student wants to generate new flashcards, quizzes, or mind maps.
+   <!--ACTION:GENERATE_TOOLS:{"documentId":"<uuid>","types":["flashcards","quiz","mind-map"],"planId":"<uuid>","day":3,"topic":"target topic","instructions":"student's custom request"}-->
+   Use this when the student wants to generate new flashcards, quizzes, mind maps, summaries, notes, or study guides. If an active plan is open or the user asks to add the material to a plan/day, include planId and day so the generated material is inserted into the plan as a ready activity.
    **For mind maps**: ALWAYS include a "topics" array with 3-6 key topics from the document so that separate focused mind maps are generated per topic instead of one giant mind map. Example:
    <!--ACTION:GENERATE_TOOLS:{"documentId":"<uuid>","types":["mind-map"],"topics":["Photosynthesis","Cell Division","DNA Replication"]}-->
 
@@ -302,7 +311,7 @@ Available actions:
 
 6. **Adapt an existing study plan:**
    <!--ACTION:ADAPT_PLAN:{"planId":"<uuid>","request":"student's exact adaptation request and constraints"}-->
-   Use this when the student asks to adapt, adjust, rebalance, reschedule, make easier/harder, recover from missed work, or focus future plan days on weak topics. Preserve completed/current work; the backend will rewrite only future days from performance, activity, and plan memory.
+   Use this when the student asks to adapt, adjust, rebalance, reschedule, make easier/harder, recover from missed work, focus future plan days on weak topics, or edit a specific existing day such as "add smart summary on day 3". Preserve completed/current work unless the student explicitly requests a specific day edit.
 
 7. **Configure reminders:**
    <!--ACTION:SET_REMINDERS:{"dailyReminderTime":"19:00","timezone":"Asia/Calcutta"}-->
@@ -333,6 +342,7 @@ Module 2 checklist before creating a plan:
 - Only use action markers when the student has confirmed or when context makes the intent clear
 - If you ask the student a question, do not also emit an action marker that starts a session or changes their plan in the same response
 - For missed-day or catch-up questions, explain the catch-up options first: generate any missing material for the missed day, continue today's scheduled material, or start due review only if the student explicitly chooses review
+- If the user requests a new or custom study tool while a plan is active, generate it with planId/day when the target day is known; otherwise adapt the plan first so the material has a clear day and activity slot
 - Always explain what you're about to do before using an action marker
 - When suggesting tool generation, list which types and explain why (e.g., "Mind maps help you see the big picture first")
 - After creating a plan, summarize it and ask if they want to start today's session

@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
         .from('outputs')
         .select('id, type')
         .eq('document_id', documentId)
-        .in('type', ['flashcards', 'quiz', 'mind_map']),
+        .in('type', ['study_guide', 'summary', 'notes', 'flashcards', 'quiz', 'mind_map']),
     ])
 
     // Get unique source set IDs for each type from review_cards
@@ -66,10 +66,28 @@ export async function POST(req: NextRequest) {
     const outputFlashcards = outputs.filter(o => o.type === 'flashcards').length
     const outputQuizzes = outputs.filter(o => o.type === 'quiz').length
     const outputMindmaps = outputs.filter(o => o.type === 'mind_map').length
+    const outputStudyGuides = outputs.filter(o => o.type === 'study_guide').length
+    const outputSummaries = outputs.filter(o => o.type === 'summary').length
+    const outputSmartNotes = outputs.filter(o => o.type === 'notes').length
 
     return NextResponse.json({
       document: { id: doc.id, title: doc.title },
       tools: {
+        studyGuides: {
+          setCount: outputStudyGuides,
+          cardCount: 0,
+          setIds: outputs.filter(o => o.type === 'study_guide').map(o => o.id),
+        },
+        summaries: {
+          setCount: outputSummaries,
+          cardCount: 0,
+          setIds: outputs.filter(o => o.type === 'summary').map(o => o.id),
+        },
+        smartNotes: {
+          setCount: outputSmartNotes,
+          cardCount: 0,
+          setIds: outputs.filter(o => o.type === 'notes').map(o => o.id),
+        },
         flashcards: {
           setCount: Math.max(uniqueFlashcardSets.size, outputFlashcards),
           cardCount: flashcardResult.data?.length || 0,
